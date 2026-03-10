@@ -3,19 +3,108 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Fleet Buddy</title>
+<title>FleetBuddy</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Barlow+Condensed:wght@400;600;700;800&display=swap" rel="stylesheet" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
+  :root {
+    --cyan:    #00d4ff;
+    --amber:   #ffb800;
+    --green:   #00e87a;
+    --red:     #ff4444;
+    --bg:      #07090d;
+    --surface: #0c1018;
+    --surface2:#111823;
+    --border:  #1c2636;
+    --border2: #243044;
+    --text:    #d8e4f0;
+    --muted:   #4a6180;
+    --mono:    'IBM Plex Mono', monospace;
+    --display: 'Barlow Condensed', sans-serif;
+    --body:    'Rajdhani', sans-serif;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { background: #04101e; min-height: 100vh; }
-  select option { background: #1e293b; }
+  html, body {
+    background: var(--bg);
+    min-height: 100vh;
+    font-family: var(--body);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  #root { position: relative; z-index: 1; }
+  select option { background: #111823; }
   ::-webkit-scrollbar { width: 4px; }
-  ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
   input, select, textarea { -webkit-appearance: none; appearance: none; }
+  input::placeholder, textarea::placeholder { color: var(--muted); }
+
+  @keyframes scanline {
+    0%   { transform: translateY(-100%); opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { transform: translateY(500%); opacity: 0; }
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes decode {
+    0%  { letter-spacing: 0.4em; opacity: 0.3; }
+    100%{ letter-spacing: 0.08em; opacity: 1; }
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .animate-in { animation: slide-up 0.3s ease forwards; }
+  .decode-anim { animation: decode 0.5s ease forwards; }
+
+  .field-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    padding: 13px 16px;
+    color: var(--text);
+    font-size: 15px;
+    font-family: var(--body);
+    font-weight: 500;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .field-input:focus {
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px rgba(0,212,255,0.07);
+  }
+  .field-input.filled { border-color: rgba(0,212,255,0.3); }
+  select.field-input { cursor: pointer; }
+  .field-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 7px;
+  }
 </style>
 </head>
 <body>
@@ -27,52 +116,29 @@ const { useState, useRef, useEffect } = React;
 const SHEET_URL = "https://script.google.com/macros/s/AKfycbz0SZ0W-wBmwEe4vd0hwxuIp9Yh5XV88udlZF0wHMETROqlHb1OceN_JuoYpPm7g3o/exec";
 
 const DEFAULT_DEPARTMENTS = [
-  "Construction",
-  "Contract Management",
-  "Engineering",
-  "Facilities",
-  "Office Services",
-  "Operational Support Services",
-  "Operations Technical Services (OTS)",
-  "Purchasing & Stores",
-  "RMC",
-  "Safety",
-  "System Operations (SysOps)",
-  "Training",
-  "Transportation",
-  "Spare / Awaiting Redeployment",
-  "Utility Field Services (UFS)",
+  "Construction","Contract Management","Engineering","Facilities",
+  "Office Services","Operational Support Services",
+  "Operations Technical Services (OTS)","Purchasing & Stores","RMC","Safety",
+  "Spare / Awaiting Redeployment","System Operations (SysOps)","Training",
+  "Transportation","Utility Field Services (UFS)",
 ];
 const DEFAULT_LOCATIONS = [
-  "Albany Resource Center",
-  "Central Resource Center",
-  "Coos Bay Resource Center",
-  "Eugene Resource Center",
-  "Lincoln City Resource Center",
-  "Mt Scott Resource Center",
-  "Parkrose Resource Center",
-  "Salem Resource Center",
-  "Sherwood OTC",
-  "Sunset Resource Center",
-  "The Dalles Resource Center",
-  "Warrenton Resource Center",
-  "Clark County Resource Center",
-  "Transportation",
-  "Spare / Pool Vehicle",
-  "250 Taylor (Corporate)",
-  "Portland LNG Plant",
-  "Newport LNG Plant",
-  "Mist Storage Facility",
-  "Off-Site / Unassigned",
+  "Albany Resource Center","Central Resource Center","Coos Bay Resource Center",
+  "Eugene Resource Center","Lincoln City Resource Center","Mt Scott Resource Center",
+  "Parkrose Resource Center","Salem Resource Center","Sherwood OTC",
+  "Sunset Resource Center","The Dalles Resource Center","Warrenton Resource Center",
+  "Clark County Resource Center","Transportation","Spare / Pool Vehicle",
+  "250 Taylor (Corporate)","Portland LNG Plant","Newport LNG Plant",
+  "Miller Station","Off-Site / Unassigned","Dear Friends and Family",
 ];
 
 const steps = [
-  { id:"plate",   label:"License Plate", icon:"🪪", hint:"Fill the frame with the license plate — every character must be legible" },
-  { id:"vin",     label:"VIN",           icon:"🔢", hint:"Dashboard VIN near windshield or driver-side door jamb sticker" },
-  { id:"details", label:"Details",       icon:"📋", hint:"Confirm decoded info and assign department, location & driver" },
+  { id:"plate",   label:"License Plate", short:"PLATE",  num:"01" },
+  { id:"vin",     label:"VIN",           short:"VIN",    num:"02" },
+  { id:"details", label:"Details",       short:"DETAILS",num:"03" },
 ];
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Image / API helpers ──────────────────────────────────────────────────────
 
 const toBase64 = file => new Promise((res, rej) => {
   const img = new Image();
@@ -82,7 +148,7 @@ const toBase64 = file => new Promise((res, rej) => {
     let w = img.width, h = img.height;
     if (w > MAX || h > MAX) {
       if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-      else { w = Math.round(w * MAX / h); h = MAX; }
+      else       { w = Math.round(w * MAX / h); h = MAX; }
     }
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
@@ -94,217 +160,271 @@ const toBase64 = file => new Promise((res, rej) => {
   img.src = url;
 });
 
-
 const GEMINI_URL = "/api/gemini";
-
 let lastGeminiError = "";
+
 async function geminiVision(file, prompt) {
   try {
     const b64  = await toBase64(file);
     const resp = await fetch(GEMINI_URL, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({
-        contents: [{ parts: [
-          { inline_data: { mime_type: file.type || "image/jpeg", data: b64 } },
+        contents:[{ parts:[
+          { inline_data:{ mime_type: file.type||"image/jpeg", data:b64 } },
           { text: prompt }
         ]}],
-        generationConfig: { maxOutputTokens: 60, temperature: 0 }
+        generationConfig:{ maxOutputTokens:60, temperature:0 }
       })
     });
     const data = await resp.json();
-    if (data.error) { lastGeminiError = "API ERR: " + data.error.message; return ""; }
+    if (data.error) { lastGeminiError = "API ERR: "+data.error.message; return ""; }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) {
       const reason = data.candidates?.[0]?.finishReason || data.promptFeedback?.blockReason || JSON.stringify(data).substring(0,150);
-      lastGeminiError = "Blocked: " + reason;
-      return "";
+      lastGeminiError = "Blocked: "+reason; return "";
     }
-    lastGeminiError = "";
-    return text.trim();
-  } catch(e) {
-    lastGeminiError = "FETCH ERR: " + e.message;
-    return "";
-  }
+    lastGeminiError = ""; return text.trim();
+  } catch(e) { lastGeminiError = "FETCH ERR: "+e.message; return ""; }
 }
 
 async function readPlateFromImage(file) {
   const raw = await geminiVision(file, "Read the license plate in this image. Return ONLY the plate characters exactly as shown, no spaces, no state name, no extra text. If unreadable, return NOTFOUND.");
-  const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (!clean || clean === "NOTFOUND" || clean.length < 2) {
-    if (!lastGeminiError) lastGeminiError = raw ? ("Got: " + raw.substring(0,80)) : "No text in response";
+  const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g,"");
+  if (!clean||clean==="NOTFOUND"||clean.length<2) {
+    if (!lastGeminiError) lastGeminiError = raw?("Got: "+raw.substring(0,80)):"No text in response";
   }
-  return clean && clean !== "NOTFOUND" && clean.length >= 2 ? clean : null;
+  return clean&&clean!=="NOTFOUND"&&clean.length>=2?clean:null;
 }
 
 async function readVinFromImage(file) {
   const raw = await geminiVision(file, "Find the Vehicle Identification Number (VIN) in this image. Return ONLY the 17-character VIN, no spaces, dashes, or extra text. If not found, return NOTFOUND.");
-  const clean = raw.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
-  return clean.length === 17 ? clean : null;
+  const clean = raw.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,"");
+  return clean.length===17?clean:null;
 }
 
 async function decodeVin(vin) {
   const resp = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/${vin}?format=json`);
   const data = await resp.json();
-  const r    = data.Results?.[0] || {};
+  const r = data.Results?.[0]||{};
   return {
-    year:      r.ModelYear       || "",
-    make:      r.Make            || "",
-    model:     r.Model           || "",
-    trim:      r.Trim            || "",
-    body:      r.BodyClass       || "",
-    engine:    r.DisplacementL   ? `${parseFloat(r.DisplacementL).toFixed(1)}L` : "",
-    cylinders: r.EngineCylinders || "",
-    drive:     r.DriveType       || "",
-    fuel:      r.FuelTypePrimary || "",
+    year: r.ModelYear||"", make:r.Make||"", model:r.Model||"", trim:r.Trim||"",
+    body:r.BodyClass||"", engine:r.DisplacementL?`${parseFloat(r.DisplacementL).toFixed(1)}L`:"",
+    cylinders:r.EngineCylinders||"", drive:r.DriveType||"", fuel:r.FuelTypePrimary||"",
   };
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── UI Primitives ─────────────────────────────────────────────────────────────
+
+function BracketCard({ children, accent="cyan", style={} }) {
+  const c = { cyan:"#00d4ff", amber:"#ffb800", green:"#00e87a", red:"#ff4444" }[accent]||"#00d4ff";
+  return (
+    <div style={{ position:"relative", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:4, padding:"18px 20px", ...style }}>
+      <span style={{ position:"absolute", top:-1, left:-1, width:14, height:14, borderTop:`2px solid ${c}`, borderLeft:`2px solid ${c}`, opacity:0.65 }} />
+      <span style={{ position:"absolute", top:-1, right:-1, width:14, height:14, borderTop:`2px solid ${c}`, borderRight:`2px solid ${c}`, opacity:0.65 }} />
+      <span style={{ position:"absolute", bottom:-1, left:-1, width:14, height:14, borderBottom:`2px solid ${c}`, borderLeft:`2px solid ${c}`, opacity:0.65 }} />
+      <span style={{ position:"absolute", bottom:-1, right:-1, width:14, height:14, borderBottom:`2px solid ${c}`, borderRight:`2px solid ${c}`, opacity:0.65 }} />
+      {children}
+    </div>
+  );
+}
+
+function DataTag({ label, value, color="var(--cyan)" }) {
+  return (
+    <div style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:4, padding:"10px 12px" }}>
+      <div style={{ fontFamily:"var(--mono)", fontSize:9, letterSpacing:"0.1em", color:"var(--muted)", textTransform:"uppercase", marginBottom:4 }}>{label}</div>
+      <div style={{ fontFamily:"var(--mono)", fontSize:13, fontWeight:600, color, letterSpacing:"0.06em", wordBreak:"break-all" }}>{value||"—"}</div>
+    </div>
+  );
+}
+
+function StatusPill({ color, label }) {
+  return (
+    <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:`${color}14`, border:`1px solid ${color}40`, borderRadius:2, padding:"4px 12px" }}>
+      <span style={{ width:5, height:5, borderRadius:"50%", background:color, boxShadow:`0 0 6px ${color}` }} />
+      <span style={{ fontFamily:"var(--mono)", fontSize:10, color, letterSpacing:"0.08em", textTransform:"uppercase" }}>{label}</span>
+    </span>
+  );
+}
+
+// ── Camera Capture ────────────────────────────────────────────────────────────
 
 function CameraCapture({ label, hint, onCapture, captured }) {
   const ref = useRef();
-  const onChange = e => {
-    const f = e.target.files[0];
-    if (f) onCapture({ file: f, url: URL.createObjectURL(f) });
-  };
+  const onChange = e => { const f=e.target.files[0]; if(f) onCapture({file:f, url:URL.createObjectURL(f)}); };
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-      <p style={{ color:"#94a3b8", fontSize:13, margin:0, lineHeight:1.6 }}>{hint}</p>
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>{hint}</p>
       <input ref={ref} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={onChange} />
       {captured ? (
         <div style={{ position:"relative" }}>
-          <img src={captured.url} alt={label} style={{ width:"100%", borderRadius:12, maxHeight:240, objectFit:"cover", border:"2px solid #22c55e", boxShadow:"0 0 24px rgba(34,197,94,0.2)" }} />
-          <button onClick={() => ref.current.click()} style={{ position:"absolute", bottom:10, right:10, background:"rgba(0,0,0,0.75)", color:"#fff", border:"1px solid rgba(255,255,255,0.2)", borderRadius:8, padding:"6px 14px", fontSize:12, cursor:"pointer" }}>Retake</button>
-          <div style={{ position:"absolute", top:10, left:10, background:"#22c55e", borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:700, color:"#000" }}>✓ Captured</div>
+          <img src={captured.url} alt={label} style={{ width:"100%", borderRadius:4, maxHeight:220, objectFit:"cover", border:"1px solid var(--border2)", display:"block" }} />
+          <span style={{ position:"absolute", top:8, left:8, width:18, height:18, borderTop:"2px solid var(--green)", borderLeft:"2px solid var(--green)" }} />
+          <span style={{ position:"absolute", top:8, right:8, width:18, height:18, borderTop:"2px solid var(--green)", borderRight:"2px solid var(--green)" }} />
+          <span style={{ position:"absolute", bottom:8, left:8, width:18, height:18, borderBottom:"2px solid var(--green)", borderLeft:"2px solid var(--green)" }} />
+          <span style={{ position:"absolute", bottom:8, right:8, width:18, height:18, borderBottom:"2px solid var(--green)", borderRight:"2px solid var(--green)" }} />
+          <div style={{ position:"absolute", top:10, left:10, background:"var(--green)", color:"#000", fontFamily:"var(--mono)", fontSize:9, fontWeight:700, padding:"3px 10px", borderRadius:2, letterSpacing:"0.1em" }}>CAPTURED ✓</div>
+          <button onClick={()=>ref.current.click()} style={{ position:"absolute", bottom:10, right:10, background:"rgba(7,9,13,0.88)", color:"var(--muted)", border:"1px solid var(--border2)", borderRadius:2, padding:"5px 12px", fontFamily:"var(--mono)", fontSize:10, cursor:"pointer", letterSpacing:"0.08em" }}>RETAKE</button>
         </div>
       ) : (
-        <button onClick={() => ref.current.click()} style={{ background:"rgba(255,255,255,0.04)", border:"2px dashed rgba(255,255,255,0.15)", borderRadius:12, padding:"44px 24px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:12, color:"#fff", width:"100%", transition:"all 0.2s" }}>
-          <span style={{ fontSize:38 }}>📷</span>
-          <span style={{ fontSize:14, fontWeight:600, fontFamily:"'DM Mono', monospace" }}>TAP TO CAPTURE</span>
-          <span style={{ fontSize:11, color:"#64748b" }}>{label}</span>
+        <button onClick={()=>ref.current.click()} style={{
+          background:"var(--surface2)", border:"1px dashed var(--border2)", borderRadius:4,
+          padding:"42px 20px", cursor:"pointer", display:"flex", flexDirection:"column",
+          alignItems:"center", gap:14, color:"#fff", width:"100%", position:"relative", overflow:"hidden",
+          transition:"all 0.2s"
+        }}
+          onMouseEnter={e=>{ e.currentTarget.style.borderColor="rgba(0,212,255,0.4)"; e.currentTarget.style.background="rgba(0,212,255,0.04)"; }}
+          onMouseLeave={e=>{ e.currentTarget.style.borderColor="var(--border2)"; e.currentTarget.style.background="var(--surface2)"; }}
+        >
+          <div style={{ position:"absolute", left:0, right:0, height:2, background:"linear-gradient(90deg,transparent,var(--cyan),transparent)", animation:"scanline 2.8s ease-in-out infinite", opacity:0.35 }} />
+          <span style={{ position:"absolute", top:10, left:10, width:16, height:16, borderTop:"1px solid var(--cyan)", borderLeft:"1px solid var(--cyan)", opacity:0.4 }} />
+          <span style={{ position:"absolute", top:10, right:10, width:16, height:16, borderTop:"1px solid var(--cyan)", borderRight:"1px solid var(--cyan)", opacity:0.4 }} />
+          <span style={{ position:"absolute", bottom:10, left:10, width:16, height:16, borderBottom:"1px solid var(--cyan)", borderLeft:"1px solid var(--cyan)", opacity:0.4 }} />
+          <span style={{ position:"absolute", bottom:10, right:10, width:16, height:16, borderBottom:"1px solid var(--cyan)", borderRight:"1px solid var(--cyan)", opacity:0.4 }} />
+          <div style={{ fontSize:34 }}>📷</div>
+          <div style={{ fontFamily:"var(--display)", fontSize:20, fontWeight:700, letterSpacing:"0.15em", color:"var(--text)" }}>TAP TO CAPTURE</div>
+          <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.08em", textTransform:"uppercase" }}>{label}</div>
         </button>
       )}
     </div>
   );
 }
 
-function ScanStatus({ state, label, value, color, bg, border: bc }) {
-  const states = {
-    reading:  { bg:"rgba(249,115,22,0.07)", bc:"rgba(249,115,22,0.2)", icon:"🔍", text:`Reading ${label}...`, sub:"AI is scanning your photo", textColor:"#fb923c" },
-    decoding: { bg:"rgba(96,165,250,0.07)", bc:"rgba(96,165,250,0.2)", icon:"🔄", text:"Decoding VIN with NHTSA...", sub:"Fetching year, make, model & specs", textColor:"#60a5fa" },
-  };
-  if (state === "idle") return null;
-  if (states[state]) {
-    const s = states[state];
-    return (
-      <div style={{ background:s.bg, border:`1px solid ${s.bc}`, borderRadius:10, padding:"13px 16px", marginTop:14, display:"flex", alignItems:"center", gap:12 }}>
-        <span style={{ fontSize:22 }}>{s.icon}</span>
-        <div>
-          <div style={{ color:s.textColor, fontSize:13, fontWeight:600 }}>{s.text}</div>
-          <div style={{ color:"#475569", fontSize:11, marginTop:2 }}>{s.sub}</div>
-        </div>
-      </div>
-    );
-  }
-  if (state === "done" && value) return (
-    <div style={{ background: bg || "rgba(34,197,94,0.07)", border:`1px solid ${bc || "rgba(34,197,94,0.25)"}`, borderRadius:10, padding:"13px 16px", marginTop:14, display:"flex", alignItems:"center", gap:10 }}>
-      <span style={{ fontSize:20 }}>✅</span>
+// ── Scan Status ───────────────────────────────────────────────────────────────
+
+function ScanStatus({ state, label, value, isVin }) {
+  if (state==="idle") return null;
+  if (state==="reading") return (
+    <div className="animate-in" style={{ background:"rgba(255,184,0,0.05)", border:"1px solid rgba(255,184,0,0.18)", borderRadius:4, padding:"14px 16px", marginTop:12, display:"flex", alignItems:"center", gap:14 }}>
+      <div style={{ width:16, height:16, border:"2px solid var(--amber)", borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.75s linear infinite", flexShrink:0 }} />
       <div>
-        <div style={{ fontSize:11, color: color || "#22c55e", textTransform:"uppercase", letterSpacing:0.5, fontWeight:700 }}>{label} Read</div>
-        <div style={{ fontSize:16, fontWeight:700, color:"#e2e8f0", fontFamily:"'DM Mono', monospace", marginTop:2 }}>{value}</div>
+        <div style={{ fontFamily:"var(--display)", fontSize:16, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)" }}>SCANNING {label.toUpperCase()}</div>
+        <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>AI analyzing image...</div>
+      </div>
+    </div>
+  );
+  if (state==="decoding") return (
+    <div className="animate-in" style={{ background:"rgba(0,212,255,0.05)", border:"1px solid rgba(0,212,255,0.18)", borderRadius:4, padding:"14px 16px", marginTop:12, display:"flex", alignItems:"center", gap:14 }}>
+      <div style={{ width:16, height:16, border:"2px solid var(--cyan)", borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.75s linear infinite", flexShrink:0 }} />
+      <div>
+        <div style={{ fontFamily:"var(--display)", fontSize:16, fontWeight:700, letterSpacing:"0.1em", color:"var(--cyan)" }}>DECODING VIN</div>
+        <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>Querying NHTSA database...</div>
+      </div>
+    </div>
+  );
+  if (state==="done"&&value) return (
+    <div className="animate-in" style={{ background:"rgba(0,232,122,0.05)", border:"1px solid rgba(0,232,122,0.22)", borderRadius:4, padding:"14px 16px", marginTop:12, display:"flex", alignItems:"center", gap:14 }}>
+      <span style={{ fontSize:20, flexShrink:0, color:"var(--green)" }}>✓</span>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:5 }}>{label} DETECTED</div>
+        <div className="decode-anim" style={{ fontFamily:"var(--mono)", fontSize:isVin?11:20, fontWeight:700, color:"var(--green)", letterSpacing:isVin?"0.1em":"0.2em", wordBreak:"break-all" }}>{value}</div>
       </div>
     </div>
   );
   return null;
 }
 
+// ── Vehicle Card ──────────────────────────────────────────────────────────────
+
 function VehicleCard({ info, vin }) {
   if (!info) return null;
+  const specs = [info.body, info.engine&&`${info.engine}${info.cylinders?" · "+info.cylinders+"cyl":""}`, info.drive, info.fuel].filter(Boolean);
   return (
-    <div style={{ background:"rgba(34,197,94,0.06)", border:"1px solid rgba(34,197,94,0.2)", borderRadius:12, padding:"14px 16px", marginTop:10 }}>
-      <div style={{ fontSize:11, color:"#22c55e", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Vehicle Decoded ✓</div>
-      <div style={{ fontSize:17, fontWeight:700, color:"#f1f5f9", marginBottom:3 }}>{info.year} {info.make} {info.model} {info.trim}</div>
-      <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>
-        {[info.body, info.engine && `${info.engine}${info.cylinders ? " · "+info.cylinders+"cyl":""}`, info.drive, info.fuel].filter(Boolean).join("  ·  ")}
+    <BracketCard accent="green" style={{ marginTop:12 }}>
+      <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--green)", letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:8 }}>VEHICLE DECODED ✓</div>
+      <div style={{ fontFamily:"var(--display)", fontSize:26, fontWeight:800, letterSpacing:"0.04em", color:"var(--text)", marginBottom:4 }}>
+        {info.year} {info.make} {info.model}
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px", borderTop:"1px solid rgba(34,197,94,0.15)", paddingTop:10 }}>
-        {[["Year",info.year],["Make",info.make],["Model",info.model],["Trim",info.trim],["Drive",info.drive],["Fuel",info.fuel]].filter(([,v])=>v).map(([k,v])=>(
-          <div key={k}>
-            <div style={{ fontSize:9, color:"#475569", textTransform:"uppercase", letterSpacing:1 }}>{k}</div>
-            <div style={{ fontSize:12, color:"#e2e8f0", fontWeight:500 }}>{v}</div>
-          </div>
-        ))}
-      </div>
-      {vin && <div style={{ fontSize:10, color:"#334155", fontFamily:"'DM Mono', monospace", marginTop:8, paddingTop:8, borderTop:"1px solid rgba(255,255,255,0.06)" }}>{vin}</div>}
-    </div>
+      {info.trim && <div style={{ fontFamily:"var(--body)", fontSize:14, color:"var(--muted)", marginBottom:10 }}>{info.trim}</div>}
+      {specs.length>0 && (
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:12 }}>
+          {specs.map(s => (
+            <span key={s} style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:2, padding:"3px 9px", fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.05em" }}>{s}</span>
+          ))}
+        </div>
+      )}
+      {vin && <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"rgba(0,232,122,0.35)", letterSpacing:"0.1em", borderTop:"1px solid var(--border)", paddingTop:10 }}>{vin}</div>}
+    </BracketCard>
   );
 }
+
+// ── Manual Entry ──────────────────────────────────────────────────────────────
 
 function ManualEntry({ label, value, setValue, onSubmit, btnLabel, maxLen }) {
   return (
-    <div style={{ background:"rgba(239,68,68,0.07)", border:"1px solid rgba(239,68,68,0.2)", borderRadius:10, padding:14, marginTop:14 }}>
-      <div style={{ color:"#ef4444", fontSize:13, fontWeight:600, marginBottom:5 }}>⚠️ Could not read {label}</div>
-      <div style={{ color:"#64748b", fontSize:11, marginBottom:10 }}>Retake the photo, or enter manually:</div>
-      <input value={value} onChange={e => setValue(e.target.value.toUpperCase())} placeholder={`Enter ${label}`} maxLength={maxLen}
-        style={{ width:"100%", background:"rgba(0,0,0,0.4)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:8, padding:"10px 14px", color:"#e2e8f0", fontSize:13, outline:"none", fontFamily:"'DM Mono', monospace", boxSizing:"border-box", marginBottom:8 }} />
-      <button onClick={onSubmit} disabled={!value.trim()} style={{ width:"100%", border:"none", borderRadius:8, padding:"10px", background: value.trim() ? "linear-gradient(135deg,#0095ff,#0070cc)" : "rgba(255,255,255,0.06)", color: value.trim() ? "#fff" : "#334155", fontSize:13, fontWeight:700, cursor: value.trim() ? "pointer" : "not-allowed", fontFamily:"'Bebas Neue', sans-serif", letterSpacing:1.5 }}>
-        {btnLabel}
-      </button>
+    <div className="animate-in" style={{ background:"rgba(255,68,68,0.04)", border:"1px solid rgba(255,68,68,0.18)", borderRadius:4, padding:"16px", marginTop:12 }}>
+      <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--red)", letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>⚠ SCAN FAILED — ENTER MANUALLY</div>
+      <input value={value} onChange={e=>setValue(e.target.value.toUpperCase())} placeholder={`Enter ${label}`} maxLength={maxLen}
+        className="field-input" style={{ marginBottom:10, fontFamily:"var(--mono)", fontSize:14, letterSpacing:"0.1em" }} />
+      <button onClick={onSubmit} disabled={!value.trim()} style={{
+        width:"100%", border:"none", borderRadius:3, padding:"11px",
+        background: value.trim()?"linear-gradient(90deg,#00d4ff,#0099cc)":"var(--surface2)",
+        color: value.trim()?"#000":"var(--muted)",
+        fontFamily:"var(--display)", fontSize:17, fontWeight:700, letterSpacing:"0.12em",
+        cursor: value.trim()?"pointer":"not-allowed",
+      }}>{btnLabel}</button>
     </div>
   );
 }
+
+// ── Confirmation ──────────────────────────────────────────────────────────────
 
 function ConfirmationCard({ data, sheetStatus, sheetAction, onReset }) {
-  const s = ({
-    synced:  { dot:"🟢", color:"#22c55e", bg:"rgba(34,197,94,0.08)",  bc:"rgba(34,197,94,0.25)",  msg:"Synced to Google Sheets" },
-    error:   { dot:"🔴", color:"#ef4444", bg:"rgba(239,68,68,0.08)",  bc:"rgba(239,68,68,0.25)",  msg:"Sheet sync failed — saved locally" },
-    pending: { dot:"🟡", color:"#fb923c", bg:"rgba(249,115,22,0.08)", bc:"rgba(249,115,22,0.25)", msg:"Syncing to Google Sheets..." },
-  })[sheetStatus] || { dot:"⚪", color:"#64748b", bg:"rgba(255,255,255,0.04)", bc:"rgba(255,255,255,0.1)", msg:"No sheet connected" };
   const vi = data.vehicleInfo;
   return (
-    <div style={{ background:"linear-gradient(135deg,#0f1f1a,#0f1a27)", border:"1px solid rgba(34,197,94,0.25)", borderRadius:20, padding:26, textAlign:"center", boxShadow:"0 0 60px rgba(34,197,94,0.08)" }}>
-      <div style={{ fontSize:48, marginBottom:8 }}>✅</div>
-      <h2 style={{ fontFamily:"'Bebas Neue', sans-serif", fontSize:28, letterSpacing:2, color:"#22c55e", margin:"0 0 4px" }}>VEHICLE LOGGED</h2>
-      <p style={{ color:"#475569", fontSize:12, margin:"0 0 10px" }}>{new Date().toLocaleString()}</p>
-      {sheetAction && (
-        <div style={{ display:"inline-flex", alignItems:"center", gap:6, marginBottom:10, background: sheetAction==="NEW VEHICLE"?"rgba(96,165,250,0.1)":"rgba(251,146,60,0.1)", border:`1px solid ${sheetAction==="NEW VEHICLE"?"rgba(96,165,250,0.3)":"rgba(251,146,60,0.3)"}`, borderRadius:20, padding:"5px 14px", fontSize:11, fontWeight:700, color: sheetAction==="NEW VEHICLE"?"#60a5fa":"#fb923c", letterSpacing:1, textTransform:"uppercase" }}>
-          {sheetAction==="NEW VEHICLE" ? "🆕 New Vehicle Added" : "🔄 Existing Record Updated"}
-        </div>
-      )}
-      <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:s.bg, border:`1px solid ${s.bc}`, borderRadius:20, padding:"6px 16px", fontSize:12, marginBottom:18, color:s.color }}>
-        {s.dot} {s.msg}
-      </div>
+    <div className="animate-in" style={{ paddingBottom:40 }}>
+      <BracketCard accent="green" style={{ textAlign:"center", padding:"32px 24px", marginBottom:14 }}>
+        <div style={{ fontSize:50, marginBottom:12 }}>✅</div>
+        <div style={{ fontFamily:"var(--display)", fontSize:40, fontWeight:800, letterSpacing:"0.1em", color:"var(--green)", lineHeight:1 }}>VEHICLE LOGGED</div>
+        <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:8, marginBottom:18 }}>{new Date().toLocaleString()}</div>
+        {sheetAction && (
+          <div style={{ marginBottom:10 }}>
+            <StatusPill color={sheetAction==="NEW VEHICLE"?"var(--cyan)":"var(--amber)"} label={sheetAction==="NEW VEHICLE"?"NEW RECORD ADDED":"RECORD UPDATED"} />
+          </div>
+        )}
+        <StatusPill
+          color={sheetStatus==="synced"?"var(--green)":sheetStatus==="pending"?"var(--amber)":sheetStatus==="error"?"var(--red)":"var(--muted)"}
+          label={sheetStatus==="synced"?"Synced to Google Sheets":sheetStatus==="pending"?"Syncing...":sheetStatus==="error"?"Sync Failed":"No Sheet"}
+        />
+      </BracketCard>
+
       {vi && (
-        <div style={{ background:"rgba(0,0,0,0.35)", borderRadius:14, padding:"13px 16px", marginBottom:14, textAlign:"left" }}>
-          <div style={{ fontSize:17, fontWeight:700, color:"#f1f5f9", marginBottom:2 }}>{vi.year} {vi.make} {vi.model} {vi.trim}</div>
-          <div style={{ fontSize:12, color:"#64748b" }}>{[vi.body, vi.engine, vi.drive, vi.fuel].filter(Boolean).join("  ·  ")}</div>
-          {data.vin && <div style={{ fontSize:10, color:"#334155", fontFamily:"'DM Mono', monospace", marginTop:5 }}>{data.vin}</div>}
+        <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:4, padding:"14px 16px", marginBottom:12 }}>
+          <div style={{ fontFamily:"var(--display)", fontSize:22, fontWeight:800, letterSpacing:"0.04em", marginBottom:4 }}>{vi.year} {vi.make} {vi.model} {vi.trim}</div>
+          <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)" }}>{[vi.body, vi.engine, vi.drive, vi.fuel].filter(Boolean).join("  ·  ")}</div>
+          {data.vin && <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"rgba(0,212,255,0.3)", marginTop:6 }}>{data.vin}</div>}
         </div>
       )}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
-        {[{ label:"License Plate", img:data.platePhoto?.url },{ label:"VIN Photo", img:data.vinPhoto?.url }].map(({ label, img }) => (
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+        {[{label:"License Plate",img:data.platePhoto?.url},{label:"VIN Photo",img:data.vinPhoto?.url}].map(({label,img})=>(
           <div key={label}>
-            <img src={img} alt={label} style={{ width:"100%", aspectRatio:"1", objectFit:"cover", borderRadius:10, border:"1px solid rgba(255,255,255,0.08)" }} />
-            <p style={{ color:"#475569", fontSize:11, margin:"5px 0 0", textTransform:"uppercase" }}>{label}</p>
+            <img src={img} alt={label} style={{ width:"100%", aspectRatio:"1", objectFit:"cover", borderRadius:4, border:"1px solid var(--border)", display:"block" }} />
+            <p style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", marginTop:5, textTransform:"uppercase", letterSpacing:"0.08em" }}>{label}</p>
           </div>
         ))}
       </div>
-      <div style={{ background:"rgba(0,0,0,0.3)", borderRadius:12, padding:"12px 16px", textAlign:"left", marginBottom:16 }}>
-        {[["PLATE", data.plate],["DEPARTMENT",data.department],["LOCATION",data.location],...(data.submittedBy?[["SUBMITTED BY",data.submittedBy]]:[]),...(data.assignedTo?[["ASSIGNED TO",data.assignedTo]]:[]),...(data.notes?[["NOTES",data.notes]]:[])].filter(([,v])=>v).map(([k,v])=>(
-          <div key={k} style={{ display:"flex", justifyContent:"space-between", marginBottom:5, gap:12 }}>
-            <span style={{ color:"#475569", fontSize:11, flexShrink:0 }}>{k}</span>
-            <span style={{ color:"#e2e8f0", fontSize:13, fontWeight:600, textAlign:"right", fontFamily: k==="PLATE"?"'DM Mono', monospace":"inherit" }}>{v}</span>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:4, padding:"14px 16px", marginBottom:14 }}>
+        {[["PLATE",data.plate],["DEPARTMENT",data.department],["LOCATION",data.location],...(data.submittedBy?[["SUBMITTED BY",data.submittedBy]]:[]),...(data.assignedTo?[["ASSIGNED TO",data.assignedTo]]:[]),...(data.notes?[["NOTES",data.notes]]:[])].filter(([,v])=>v).map(([k,v])=>(
+          <div key={k} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", padding:"8px 0", borderBottom:"1px solid var(--border)" }}>
+            <span style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.08em", flexShrink:0, marginRight:16 }}>{k}</span>
+            <span style={{ fontFamily:k==="PLATE"?"var(--mono)":"var(--body)", fontSize:k==="PLATE"?13:15, fontWeight:600, color:"var(--text)", textAlign:"right" }}>{v}</span>
           </div>
         ))}
       </div>
-      <button onClick={onReset} style={{ background:"linear-gradient(135deg,#0095ff,#0070cc)", color:"#fff", border:"none", borderRadius:12, padding:"14px", fontSize:15, fontWeight:700, fontFamily:"'Bebas Neue', sans-serif", letterSpacing:2, cursor:"pointer", width:"100%" }}>
-        LOG ANOTHER VEHICLE
-      </button>
+
+      <button onClick={onReset} style={{
+        width:"100%", border:"none", borderRadius:3, padding:"16px",
+        background:"linear-gradient(90deg,#00d4ff,#0099cc)", color:"#000",
+        fontFamily:"var(--display)", fontSize:20, fontWeight:800, letterSpacing:"0.15em", cursor:"pointer",
+        boxShadow:"0 4px 24px rgba(0,212,255,0.25)"
+      }}>LOG ANOTHER VEHICLE</button>
     </div>
   );
 }
 
-// ── Main App ──────────────────────────────────────────────────────────────────
+// ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
   const [departments,  setDepartments]  = useState(DEFAULT_DEPARTMENTS);
@@ -344,32 +464,29 @@ function App() {
     loadConfig();
   }, []);
 
-  const currentStep = steps[step];
   const canAdvance = [
-    plateScanState === "done" || plateScanState === "no_read",
-    vinScanState   === "done" || vinScanState   === "no_read",
-    !!(submittedBy && department && location),
-  ][step] ?? false;
+    plateScanState==="done"||plateScanState==="no_read",
+    vinScanState==="done"  ||vinScanState==="no_read",
+    !!(submittedBy&&department&&location),
+  ][step]??false;
 
   const handlePlateCapture = async data => {
-    setPlatePhoto(data);
-    setPlateScanState("reading"); setDetectedPlate(""); setManualPlate("");
+    setPlatePhoto(data); setPlateScanState("reading"); setDetectedPlate(""); setManualPlate("");
     try {
       const plate = await readPlateFromImage(data.file);
-      plate ? (setDetectedPlate(plate), setPlateScanState("done")) : (setPlateError(lastGeminiError), setPlateScanState("no_read"));
+      plate ? (setDetectedPlate(plate),setPlateScanState("done")) : (setPlateError(lastGeminiError),setPlateScanState("no_read"));
     } catch(e) { setPlateError(e.message); setPlateScanState("no_read"); }
   };
 
   const handleVinCapture = async data => {
-    setVinPhoto(data);
-    setVinScanState("reading"); setDetectedVin(""); setVehicleInfo(null); setManualVin(""); setExistingRecord(null);
+    setVinPhoto(data); setVinScanState("reading"); setDetectedVin(""); setVehicleInfo(null); setManualVin(""); setExistingRecord(null);
     try {
       const vin = await readVinFromImage(data.file);
       if (!vin) { setVinScanState("no_read"); return; }
       setDetectedVin(vin); setVinScanState("decoding");
       const info = await decodeVin(vin);
       setVehicleInfo(info); setVinScanState("done");
-      checkForDuplicate(vin, detectedPlate || manualPlate);
+      checkForDuplicate(vin, detectedPlate||manualPlate);
     } catch { setVinScanState("no_read"); }
   };
 
@@ -379,26 +496,25 @@ function App() {
   };
 
   const handleManualVin = async () => {
-    if (manualVin.length !== 17) return;
+    if (manualVin.length!==17) return;
     setVinScanState("decoding"); setDetectedVin(manualVin); setExistingRecord(null);
     try {
       const info = await decodeVin(manualVin);
       setVehicleInfo(info); setVinScanState("done");
-      checkForDuplicate(manualVin, detectedPlate || manualPlate);
+      checkForDuplicate(manualVin, detectedPlate||manualPlate);
     } catch { setVinScanState("no_read"); }
   };
 
   const checkForDuplicate = async (vin, plate) => {
     try {
-      const res  = await fetch(`${SHEET_URL}?action=checkVehicle&vin=${encodeURIComponent(vin)}&plate=${encodeURIComponent(plate || "")}`);
+      const res  = await fetch(`${SHEET_URL}?action=checkVehicle&vin=${encodeURIComponent(vin)}&plate=${encodeURIComponent(plate||"")}`);
       const json = await res.json();
       if (json.found) setExistingRecord(json);
     } catch {}
   };
 
   const reset = () => {
-    setStep(0);
-    setPlatePhoto(null); setVinPhoto(null);
+    setStep(0); setPlatePhoto(null); setVinPhoto(null);
     setPlateScanState("idle"); setDetectedPlate(""); setManualPlate("");
     setVinScanState("idle");   setDetectedVin("");   setVehicleInfo(null); setManualVin("");
     setSubmittedBy(""); setDepartment(""); setLocation(""); setAssignedTo(""); setNotes("");
@@ -409,206 +525,212 @@ function App() {
     setSubmitted(true); setSheetStatus("pending");
     try {
       const res = await fetch(SHEET_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          entryId:      "FB-" + Date.now(),
+          entryId:      "FB-"+Date.now(),
           timestamp:    new Date().toLocaleString(),
-          vin:          detectedVin   || manualVin   || "",
-          licensePlate: detectedPlate || manualPlate || "",
-          year:         vehicleInfo?.year      || "",
-          make:         vehicleInfo?.make      || "",
-          model:        vehicleInfo?.model     || "",
-          trim:         vehicleInfo?.trim      || "",
-          body:         vehicleInfo?.body      || "",
-          engine:       vehicleInfo?.engine    || "",
-          cylinders:    vehicleInfo?.cylinders || "",
-          drive:        vehicleInfo?.drive     || "",
-          fuel:         vehicleInfo?.fuel      || "",
+          vin:          detectedVin  ||manualVin  ||"",
+          licensePlate: detectedPlate||manualPlate||"",
+          year:         vehicleInfo?.year||"",      make:vehicleInfo?.make||"",
+          model:        vehicleInfo?.model||"",     trim:vehicleInfo?.trim||"",
+          body:         vehicleInfo?.body||"",      engine:vehicleInfo?.engine||"",
+          cylinders:    vehicleInfo?.cylinders||"", drive:vehicleInfo?.drive||"",
+          fuel:         vehicleInfo?.fuel||"",
           submittedBy, department, location, assignedTo, notes,
-          platePhotoUrl: "Captured on device",
-          vinPhotoUrl:   "Captured on device",
-          source:        "Fleet Buddy v1.0",
+          platePhotoUrl:"Captured on device", vinPhotoUrl:"Captured on device",
+          source:"FleetBuddy v2.0",
         })
       });
       const json = await res.json();
-      setSheetStatus(json.success ? "synced" : "error");
+      setSheetStatus(json.success?"synced":"error");
       if (json.action) setSheetAction(json.action);
     } catch { setSheetStatus("error"); }
   };
 
   return (
-    <div style={{ minHeight:"100vh", background:"linear-gradient(160deg,#04101e 0%,#071828 60%,#04101e 100%)", fontFamily:"'Inter', sans-serif", color:"#e2e8f0", display:"flex", flexDirection:"column", alignItems:"center", paddingBottom:48 }}>
+    <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center" }}>
 
       {/* Header */}
-      <div style={{ width:"100%", background:"rgba(0,0,0,0.6)", backdropFilter:"blur(20px)", borderBottom:"1px solid rgba(255,255,255,0.05)", padding:"14px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:10 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <div style={{ background:"linear-gradient(135deg,#0095ff,#0070cc)", borderRadius:10, padding:"7px 10px", fontSize:18 }}>🚗</div>
+      <div style={{
+        width:"100%", background:"rgba(7,9,13,0.94)", backdropFilter:"blur(20px)",
+        borderBottom:"1px solid var(--border)", padding:"0 20px",
+        position:"sticky", top:0, zIndex:100,
+        display:"flex", alignItems:"center", justifyContent:"space-between"
+      }}>
+        <div style={{ display:"flex", alignItems:"center", gap:14, padding:"11px 0" }}>
+          <div style={{ background:"rgba(0,212,255,0.08)", border:"1px solid rgba(0,212,255,0.25)", borderRadius:4, padding:"8px 11px", fontSize:20 }}>🚗</div>
           <div>
-            <div style={{ fontFamily:"'Bebas Neue', sans-serif", fontSize:21, letterSpacing:3, lineHeight:1, background:"linear-gradient(90deg,#0095ff,#38bdf8)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>FLEET BUDDY</div>
-            <div style={{ fontSize:9, color:"#94a3b8", letterSpacing:2, textTransform:"uppercase" }}>Buddy Suite  ·  Asset Tracking</div>
+            <div style={{ fontFamily:"var(--display)", fontSize:28, fontWeight:800, letterSpacing:"0.1em", lineHeight:1, color:"var(--cyan)" }}>FleetBuddy</div>
+            <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", textTransform:"uppercase", marginTop:2 }}>BuddySuite · Vehicle Tracking</div>
           </div>
         </div>
-        <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(0,149,255,0.1)", border:"1px solid rgba(0,149,255,0.25)", borderRadius:8, padding:"5px 10px" }}>
-            <span style={{ fontSize:10 }}>📊</span>
-            <span style={{ fontSize:10, color:"#38bdf8", fontWeight:600 }}>Sheet Live</span>
-          </div>
-          {!configLoaded && <div style={{ fontSize:9, color:"#334155" }}>Loading config...</div>}
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ width:7, height:7, borderRadius:"50%", background:"var(--green)", boxShadow:"0 0 8px var(--green)", animation:"blink 2.5s ease-in-out infinite" }} />
+          <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.08em" }}>LIVE</span>
         </div>
       </div>
 
-      <div style={{ width:"100%", maxWidth:480, padding:"20px 18px 0" }}>
+      {/* Content */}
+      <div style={{ width:"100%", maxWidth:480, padding:"20px 16px 48px" }}>
+
         {submitted ? (
           <ConfirmationCard
-            data={{ platePhoto, vinPhoto, plate: detectedPlate||manualPlate, vin: detectedVin||manualVin, vehicleInfo, submittedBy, department, location, assignedTo, notes }}
+            data={{ platePhoto, vinPhoto, plate:detectedPlate||manualPlate, vin:detectedVin||manualVin, vehicleInfo, submittedBy, department, location, assignedTo, notes }}
             sheetStatus={sheetStatus} sheetAction={sheetAction} onReset={reset}
           />
         ) : (
           <>
-            {/* Progress bar */}
-            <div style={{ display:"flex", gap:8, marginBottom:24 }}>
-              {steps.map((s, i) => (
-                <div key={s.id} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:5 }}>
-                  <div style={{ width:"100%", height:3, borderRadius:3, transition:"all 0.3s", background: i<step?"#22c55e":i===step?"linear-gradient(90deg,#0095ff,#38bdf8)":"rgba(255,255,255,0.07)" }} />
-                  <div style={{ fontSize:9, textTransform:"uppercase", letterSpacing:0.5, whiteSpace:"nowrap", fontWeight:i===step?600:400, color:i===step?"#38bdf8":i<step?"#22c55e":"#1e3a5f" }}>
-                    {i < step ? "✓" : s.icon} {s.label}
-                  </div>
-                </div>
-              ))}
+            {/* Step tracker */}
+            <div style={{ display:"flex", alignItems:"center", marginBottom:24 }}>
+              {steps.map((s,i) => {
+                const done=i<step, cur=i===step;
+                return (
+                  <React.Fragment key={s.id}>
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5 }}>
+                      <div style={{
+                        width:38, height:38, borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center",
+                        fontFamily:"var(--mono)", fontSize:done?16:11, fontWeight:700, transition:"all 0.3s",
+                        background:cur?"var(--cyan)":done?"rgba(0,212,255,0.12)":"var(--surface2)",
+                        border:cur?"none":done?"1px solid rgba(0,212,255,0.35)":"1px solid var(--border)",
+                        color:cur?"#000":done?"var(--cyan)":"var(--muted)",
+                        boxShadow:cur?"0 0 20px rgba(0,212,255,0.3)":"none"
+                      }}>{done?"✓":s.num}</div>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:9, letterSpacing:"0.07em", textTransform:"uppercase", whiteSpace:"nowrap", color:cur?"var(--cyan)":done?"rgba(0,212,255,0.45)":"var(--muted)", fontWeight:cur?600:400 }}>{s.short}</div>
+                    </div>
+                    {i<steps.length-1 && (
+                      <div style={{ flex:1, height:1, margin:"0 6px", marginBottom:20, background:done?"rgba(0,212,255,0.35)":"var(--border)", transition:"background 0.3s" }} />
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </div>
 
             {/* Step card */}
-            <div style={{ background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.06)", borderRadius:20, padding:22, marginBottom:14 }}>
-              <h2 style={{ fontFamily:"'Bebas Neue', sans-serif", fontSize:24, letterSpacing:2, margin:"0 0 2px", color:"#f1f5f9" }}>{currentStep.label.toUpperCase()}</h2>
-              <p style={{ color:"#1e3a5f", fontSize:11, margin:"0 0 18px", textTransform:"uppercase", letterSpacing:1 }}>Step {step+1} of {steps.length}</p>
+            <BracketCard style={{ marginBottom:14 }}>
+              <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:18 }}>
+                <div style={{ fontFamily:"var(--display)", fontSize:32, fontWeight:800, letterSpacing:"0.08em", color:"var(--text)", lineHeight:1 }}>
+                  {steps[step].label.toUpperCase()}
+                </div>
+                <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em" }}>STEP {step+1}/{steps.length}</div>
+              </div>
 
-              {/* STEP 0 — License Plate */}
-              {step === 0 && (
-                <>
-                  <div style={{ background:"rgba(0,149,255,0.06)", border:"1px solid rgba(0,149,255,0.15)", borderRadius:10, padding:"11px 14px", marginBottom:14, display:"flex", gap:10 }}>
-                    <span style={{ fontSize:16 }}>🤖</span>
-                    <p style={{ fontSize:12, color:"#94a3b8", lineHeight:1.6, margin:0 }}>
-                      <strong style={{ color:"#38bdf8" }}>AI-powered:</strong> Claude reads the plate number directly from your photo. Oregon and Washington plates both supported.
+              {/* STEP 0 — Plate */}
+              {step===0 && (
+                <div className="animate-in">
+                  <div style={{ background:"rgba(0,212,255,0.04)", border:"1px solid rgba(0,212,255,0.1)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
+                    <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--cyan)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>AI</span>
+                    <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
+                      Claude reads the plate directly from your photo. OR and WA plates supported.
                     </p>
                   </div>
-                  <CameraCapture label="License Plate" hint={currentStep.hint} onCapture={handlePlateCapture} captured={platePhoto} />
-                  <ScanStatus state={plateScanState} label="License Plate" value={detectedPlate} color="#38bdf8" bg="rgba(0,149,255,0.07)" border="rgba(0,149,255,0.25)" />
-                  {plateScanState === "no_read" && <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate} onSubmit={handleManualPlate} btnLabel="CONFIRM PLATE →" maxLen={10} />}
-                  {plateScanState === "no_read" && plateError && <p style={{color:"#f87171",fontSize:11,marginTop:6,fontFamily:"monospace",wordBreak:"break-all"}}>{plateError}</p>}
-                </>
+                  <CameraCapture label="License Plate" hint="Fill the frame — every character must be legible" onCapture={handlePlateCapture} captured={platePhoto} />
+                  <ScanStatus state={plateScanState} label="License Plate" value={detectedPlate} />
+                  {plateScanState==="no_read" && <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate} onSubmit={handleManualPlate} btnLabel="CONFIRM PLATE →" maxLen={10} />}
+                  {plateScanState==="no_read"&&plateError && <p style={{ fontFamily:"var(--mono)", color:"var(--red)", fontSize:10, marginTop:8, wordBreak:"break-all" }}>{plateError}</p>}
+                </div>
               )}
 
               {/* STEP 1 — VIN */}
-              {step === 1 && (
-                <>
-                  <div style={{ background:"rgba(0,149,255,0.06)", border:"1px solid rgba(0,149,255,0.15)", borderRadius:10, padding:"11px 14px", marginBottom:14, display:"flex", gap:10 }}>
-                    <span style={{ fontSize:16 }}>🤖</span>
-                    <p style={{ fontSize:12, color:"#94a3b8", lineHeight:1.6, margin:0 }}>
-                      <strong style={{ color:"#38bdf8" }}>AI-powered:</strong> Claude reads the VIN, then NHTSA instantly returns year, make, model, trim, engine, drive type, and fuel.
+              {step===1 && (
+                <div className="animate-in">
+                  <div style={{ background:"rgba(0,212,255,0.04)", border:"1px solid rgba(0,212,255,0.1)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
+                    <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--cyan)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>AI</span>
+                    <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
+                      Claude reads the VIN, then NHTSA returns year, make, model, trim, engine, drive &amp; fuel.
                     </p>
                   </div>
-                  <CameraCapture label="VIN" hint={currentStep.hint} onCapture={handleVinCapture} captured={vinPhoto} />
-                  <ScanStatus state={vinScanState} label="VIN" value={detectedVin} />
-                  {vinScanState === "done" && <VehicleCard info={vehicleInfo} vin={detectedVin} />}
-                  {vinScanState === "no_read" && <ManualEntry label="VIN (17 characters)" value={manualVin} setValue={setManualVin} onSubmit={handleManualVin} btnLabel="DECODE VIN →" maxLen={17} />}
-                </>
+                  <CameraCapture label="VIN" hint="Dashboard VIN near windshield or driver-side door jamb sticker" onCapture={handleVinCapture} captured={vinPhoto} />
+                  <ScanStatus state={vinScanState} label="VIN" value={detectedVin} isVin />
+                  {vinScanState==="done" && <VehicleCard info={vehicleInfo} vin={detectedVin} />}
+                  {vinScanState==="no_read" && <ManualEntry label="VIN (17 characters)" value={manualVin} setValue={setManualVin} onSubmit={handleManualVin} btnLabel="DECODE VIN →" maxLen={17} />}
+                </div>
               )}
 
               {/* STEP 2 — Details */}
-              {step === 2 && (
-                <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              {step===2 && (
+                <div className="animate-in" style={{ display:"flex", flexDirection:"column", gap:16 }}>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-                    {[{ label:"License Plate", value:detectedPlate||manualPlate, color:"#38bdf8" },{ label:"VIN", value:detectedVin||manualVin, color:"#22c55e" }].map(({ label, value, color }) => (
-                      <div key={label} style={{ background:"rgba(0,0,0,0.3)", borderRadius:10, padding:"10px 12px" }}>
-                        <div style={{ fontSize:9, color:"#94a3b8", textTransform:"uppercase", letterSpacing:1, marginBottom:3 }}>{label}</div>
-                        <div style={{ fontSize:12, fontWeight:700, color, fontFamily:"'DM Mono', monospace" }}>{value || "—"}</div>
-                      </div>
-                    ))}
+                    <DataTag label="License Plate" value={detectedPlate||manualPlate} color="var(--cyan)" />
+                    <DataTag label="VIN" value={(detectedVin||manualVin)?.length>9?(detectedVin||manualVin).slice(0,9)+"…":(detectedVin||manualVin)} color="var(--green)" />
                   </div>
 
                   {vehicleInfo && (
-                    <div style={{ background:"rgba(0,149,255,0.05)", border:"1px solid rgba(0,149,255,0.15)", borderRadius:10, padding:"11px 14px" }}>
-                      <div style={{ fontSize:11, color:"#38bdf8", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Decoded Vehicle</div>
-                      <div style={{ fontSize:15, fontWeight:700, color:"#f1f5f9" }}>{vehicleInfo.year} {vehicleInfo.make} {vehicleInfo.model}</div>
-                      <div style={{ fontSize:11, color:"#475569", marginTop:2 }}>{[vehicleInfo.trim, vehicleInfo.body, vehicleInfo.engine, vehicleInfo.fuel].filter(Boolean).join("  ·  ")}</div>
+                    <div style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:4, padding:"12px 14px" }}>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Decoded Vehicle</div>
+                      <div style={{ fontFamily:"var(--display)", fontSize:20, fontWeight:700, letterSpacing:"0.04em" }}>{vehicleInfo.year} {vehicleInfo.make} {vehicleInfo.model}</div>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>{[vehicleInfo.trim,vehicleInfo.body,vehicleInfo.engine,vehicleInfo.fuel].filter(Boolean).join("  ·  ")}</div>
                     </div>
                   )}
 
                   <div>
-                    <label style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:7 }}>Your Name <span style={{ color:"#ef4444" }}>*</span></label>
-                    <input value={submittedBy} onChange={e => setSubmittedBy(e.target.value)} placeholder="First and last name"
-                      style={{ width:"100%", background:"rgba(0,0,0,0.45)", border:`1px solid ${submittedBy ? "rgba(0,149,255,0.3)" : "rgba(255,255,255,0.1)"}`, borderRadius:10, padding:"12px 16px", color:"#e2e8f0", fontSize:14, outline:"none", fontFamily:"inherit" }} />
+                    <label className="field-label">Your Name <span style={{ color:"var(--red)" }}>*</span></label>
+                    <input value={submittedBy} onChange={e=>setSubmittedBy(e.target.value)} placeholder="First and last name" className={`field-input ${submittedBy?"filled":""}`} />
                   </div>
-
                   <div>
-                    <label style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:7 }}>Department <span style={{ color:"#ef4444" }}>*</span></label>
-                    <select value={department} onChange={e => setDepartment(e.target.value)} style={{ width:"100%", background:"rgba(0,0,0,0.45)", border:`1px solid ${department ? "rgba(0,149,255,0.3)" : "rgba(255,255,255,0.1)"}`, borderRadius:10, padding:"12px 16px", color: department ? "#e2e8f0" : "#475569", fontSize:14, cursor:"pointer", outline:"none" }}>
+                    <label className="field-label">Department <span style={{ color:"var(--red)" }}>*</span></label>
+                    <select value={department} onChange={e=>setDepartment(e.target.value)} className={`field-input ${department?"filled":""}`} style={{ color:department?"var(--text)":"var(--muted)" }}>
                       <option value="">Select department...</option>
-                      {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                      {departments.map(d=><option key={d} value={d}>{d}</option>)}
                     </select>
                   </div>
-
                   <div>
-                    <label style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:7 }}>Resource Center / Location <span style={{ color:"#ef4444" }}>*</span></label>
-                    <select value={location} onChange={e => setLocation(e.target.value)} style={{ width:"100%", background:"rgba(0,0,0,0.45)", border:`1px solid ${location ? "rgba(0,149,255,0.3)" : "rgba(255,255,255,0.1)"}`, borderRadius:10, padding:"12px 16px", color: location ? "#e2e8f0" : "#475569", fontSize:14, cursor:"pointer", outline:"none" }}>
+                    <label className="field-label">Resource Center / Location <span style={{ color:"var(--red)" }}>*</span></label>
+                    <select value={location} onChange={e=>setLocation(e.target.value)} className={`field-input ${location?"filled":""}`} style={{ color:location?"var(--text)":"var(--muted)" }}>
                       <option value="">Select location...</option>
-                      {locations.map(l => <option key={l} value={l}>{l}</option>)}
+                      {locations.map(l=><option key={l} value={l}>{l}</option>)}
                     </select>
                   </div>
-
                   <div>
-                    <label style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:7 }}>Assigned To (optional)</label>
-                    <input value={assignedTo} onChange={e => setAssignedTo(e.target.value)} placeholder="Driver or employee name"
-                      style={{ width:"100%", background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"12px 16px", color:"#e2e8f0", fontSize:14, outline:"none", fontFamily:"inherit" }} />
+                    <label className="field-label">Assigned To <span style={{ color:"var(--muted)", fontWeight:400 }}>(optional)</span></label>
+                    <input value={assignedTo} onChange={e=>setAssignedTo(e.target.value)} placeholder="Driver or employee name" className="field-input" />
                   </div>
-
                   <div>
-                    <label style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:7 }}>Notes (optional)</label>
-                    <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Damage, odometer, special instructions..." rows={3}
-                      style={{ width:"100%", background:"rgba(0,0,0,0.45)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"12px 16px", color:"#e2e8f0", fontSize:14, resize:"none", outline:"none", fontFamily:"inherit" }} />
+                    <label className="field-label">Notes <span style={{ color:"var(--muted)", fontWeight:400 }}>(optional)</span></label>
+                    <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Damage, odometer, special instructions..." rows={3} className="field-input" style={{ resize:"none" }} />
                   </div>
 
                   {existingRecord && (
-                    <div style={{ background:"rgba(251,146,60,0.09)", border:"2px solid rgba(251,146,60,0.4)", borderRadius:12, padding:"13px 16px" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-                        <span style={{ fontSize:18 }}>⚠️</span>
-                        <span style={{ fontFamily:"'Bebas Neue', sans-serif", fontSize:16, letterSpacing:1.5, color:"#fb923c" }}>EXISTING RECORD FOUND</span>
-                      </div>
-                      <div style={{ fontSize:13, color:"#f1f5f9", fontWeight:600, marginBottom:2 }}>
-                        {[existingRecord.year, existingRecord.make, existingRecord.model].filter(Boolean).join(" ") || "Vehicle on file"}
-                      </div>
-                      {existingRecord.lastUpdated && (
-                        <div style={{ fontSize:11, color:"#64748b" }}>Last updated: {existingRecord.lastUpdated}{existingRecord.submittedBy ? " by " + existingRecord.submittedBy : ""}</div>
-                      )}
-                      <div style={{ marginTop:8, fontSize:11, color:"#fb923c", fontWeight:600 }}>→ Submitting will UPDATE this record, not create a new one.</div>
-                    </div>
+                    <BracketCard accent="amber">
+                      <div style={{ fontFamily:"var(--display)", fontSize:15, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)", marginBottom:8 }}>⚠ EXISTING RECORD FOUND</div>
+                      <div style={{ fontFamily:"var(--body)", fontSize:15, fontWeight:600, marginBottom:4 }}>{[existingRecord.year,existingRecord.make,existingRecord.model].filter(Boolean).join(" ")||"Vehicle on file"}</div>
+                      {existingRecord.lastUpdated && <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)" }}>Last updated: {existingRecord.lastUpdated}{existingRecord.submittedBy?" · "+existingRecord.submittedBy:""}</div>}
+                      <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", marginTop:8, letterSpacing:"0.06em" }}>→ SUBMIT WILL UPDATE THIS RECORD</div>
+                    </BracketCard>
                   )}
 
-                  <div style={{ background:"rgba(0,149,255,0.06)", border:"1px solid rgba(0,149,255,0.2)", borderRadius:10, padding:"10px 14px", display:"flex", alignItems:"center", gap:10 }}>
-                    <span style={{ fontSize:18 }}>📊</span>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", background:"rgba(0,232,122,0.04)", border:"1px solid rgba(0,232,122,0.12)", borderRadius:4 }}>
+                    <span style={{ fontSize:14 }}>📊</span>
                     <div>
-                      <div style={{ fontSize:12, fontWeight:600, color:"#38bdf8" }}>Ready to sync to Google Sheets</div>
-                      <div style={{ fontSize:11, color:"#334155" }}>Plate · VIN · Year · Make · Model · Dept · Location · Submitted By</div>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--green)", letterSpacing:"0.08em" }}>READY TO SYNC</div>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", marginTop:2 }}>Plate · VIN · Vehicle · Dept · Location</div>
                     </div>
                   </div>
                 </div>
               )}
-            </div>
+            </BracketCard>
 
             {/* Navigation */}
             <div style={{ display:"flex", gap:10 }}>
-              {step > 0 && (
-                <button onClick={() => setStep(s => s-1)} style={{ flex:1, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)", color:"#64748b", borderRadius:12, padding:"15px", fontSize:14, cursor:"pointer", fontWeight:600 }}>← Back</button>
+              {step>0 && (
+                <button onClick={()=>setStep(s=>s-1)} style={{
+                  flex:1, background:"var(--surface)", border:"1px solid var(--border2)",
+                  color:"var(--muted)", borderRadius:3, padding:"15px",
+                  fontFamily:"var(--display)", fontSize:17, fontWeight:700, letterSpacing:"0.1em", cursor:"pointer",
+                }}>← BACK</button>
               )}
               <button
-                onClick={() => { if (step < 2) setStep(s => s+1); else handleSubmit(); }}
+                onClick={()=>{ if(step<2) setStep(s=>s+1); else handleSubmit(); }}
                 disabled={!canAdvance}
-                style={{ flex:2, border:"none", borderRadius:12, padding:"15px", fontSize:15, fontWeight:700, fontFamily:"'Bebas Neue', sans-serif", letterSpacing:2, cursor: canAdvance?"pointer":"not-allowed", transition:"all 0.2s",
-                  background: canAdvance ? "linear-gradient(135deg,#0095ff,#0070cc)" : "rgba(255,255,255,0.05)",
-                  color:       canAdvance ? "#fff" : "#1e3a5f",
-                  boxShadow:   canAdvance ? "0 4px 20px rgba(0,149,255,0.3)" : "none"
-                }}>
-                {step < 2 ? "NEXT →" : existingRecord ? "UPDATE VEHICLE ✓" : "SUBMIT VEHICLE ✓"}
+                style={{
+                  flex:2, border:"none", borderRadius:3, padding:"15px",
+                  fontFamily:"var(--display)", fontSize:19, fontWeight:800, letterSpacing:"0.15em",
+                  cursor:canAdvance?"pointer":"not-allowed", transition:"all 0.2s",
+                  background:canAdvance?"linear-gradient(90deg,#00d4ff,#0099cc)":"var(--surface2)",
+                  color:canAdvance?"#000":"var(--muted)",
+                  boxShadow:canAdvance?"0 4px 24px rgba(0,212,255,0.25)":"none"
+                }}
+              >
+                {step<2?"NEXT →":existingRecord?"UPDATE VEHICLE ✓":"SUBMIT VEHICLE ✓"}
               </button>
             </div>
           </>
