@@ -8,57 +8,38 @@ const MODELS = [
   "gemini-1.5-flash-latest",
 ];
 
-exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: "Method Not Allowed" };
-  }
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  try {
-    const body = JSON.parse(event.body);
-    let lastError = "";
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
-    for (const model of MODELS) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await response.json();
-        if (data.error) {
-          lastError = data.error.message;
-          if (data.error.message.includes("not found") ||
-              data.error.message.includes("no longer available") ||
-              data.error.message.includes("not supported")) {
-            continue;
-          }
-          return {
-            statusCode: 200,
-            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-            body: JSON.stringify(data),
-          };
-        }
-        return {
-          statusCode: 200,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-          body: JSON.stringify(data),
-        };
-      } catch (e) {
-        lastError = e.message;
-        continue;
+  let lastError = "";
+
+  for (const model of MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+      });
+      const data = await response.json();
+      if (data.error) {
+        lastError = data.error.message;
+        if (data.error.message.includes("not found") ||
+            data.error.message.includes("no longer available") ||
+            data.error.message.includes("not supported")) continue;
+        return res.status(200).json(data);
       }
+      return res.status(200).json(data);
+    } catch (e) {
+      lastError = e.message;
+      continue;
     }
-
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ error: { message: "All models failed. Last error: " + lastError } }),
-    };
-  } catch (e) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: { message: e.message } }),
-    };
   }
-};
+
+  return res.status(200).json({ error: { message: "All models failed. Last: " + lastError } });
+}
