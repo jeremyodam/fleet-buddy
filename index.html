@@ -132,12 +132,6 @@ const DEFAULT_LOCATIONS = [
   "Miller Station","Off-Site / Unassigned","Dear Friends and Family",
 ];
 
-const steps = [
-  { id:"plate",   label:"License Plate", short:"PLATE",  num:"01" },
-  { id:"vin",     label:"VIN",           short:"VIN",    num:"02" },
-  { id:"details", label:"Details",       short:"DETAILS",num:"03" },
-];
-
 // ── Image / API helpers ──────────────────────────────────────────────────────
 
 const toBase64 = file => new Promise((res, rej) => {
@@ -166,8 +160,11 @@ let lastGeminiError = "";
 async function geminiVision(file, prompt) {
   try {
     const b64  = await toBase64(file);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     const resp = await fetch(GEMINI_URL, {
       method:"POST", headers:{"Content-Type":"application/json"},
+      signal: controller.signal,
       body: JSON.stringify({
         contents:[{ parts:[
           { inline_data:{ mime_type: file.type||"image/jpeg", data:b64 } },
@@ -176,6 +173,7 @@ async function geminiVision(file, prompt) {
         generationConfig:{ maxOutputTokens:60, temperature:0 }
       })
     });
+    clearTimeout(timeoutId);
     const data = await resp.json();
     if (data.error) { lastGeminiError = "API ERR: "+data.error.message; return ""; }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -184,11 +182,20 @@ async function geminiVision(file, prompt) {
       lastGeminiError = "Blocked: "+reason; return "";
     }
     lastGeminiError = ""; return text.trim();
-  } catch(e) { lastGeminiError = "FETCH ERR: "+e.message; return ""; }
+  } catch(e) {
+    lastGeminiError = e.name==="AbortError" ? "TIMEOUT: Request took too long" : "FETCH ERR: "+e.message;
+    return "";
+  }
 }
 
 async function readPlateFromImage(file) {
-  const raw = await geminiVision(file, "Read the license plate in this image. Return ONLY the plate characters exactly as shown, no spaces, no state name, no extra text. If unreadable, return NOTFOUND.");
+  const raw = await geminiVision(file,
+    "Your only job: find and read the LICENSE PLATE in this photo. " +
+    "A license plate is a rectangular metal tag on the front or rear of the vehicle with letters and numbers. " +
+    "Ignore all other text — unit numbers, VINs, stickers, road signs, anything else. " +
+    "Return ONLY the license plate characters exactly as they appear, no spaces, no state name, no punctuation. " +
+    "If you cannot find a license plate, return NOTFOUND."
+  );
   const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g,"");
   if (!clean||clean==="NOTFOUND"||clean.length<2) {
     if (!lastGeminiError) lastGeminiError = raw?("Got: "+raw.substring(0,80)):"No text in response";
@@ -197,9 +204,48 @@ async function readPlateFromImage(file) {
 }
 
 async function readVinFromImage(file) {
-  const raw = await geminiVision(file, "Find the Vehicle Identification Number (VIN) in this image. Return ONLY the 17-character VIN, no spaces, dashes, or extra text. If not found, return NOTFOUND.");
+  const raw = await geminiVision(file,
+    "Your only job: find and read the 17-character Vehicle Identification Number (VIN) in this photo. " +
+    "A VIN is exactly 17 characters using only letters A-H, J-N, P-Z and digits 0-9 (never I, O, or Q). " +
+    "It is usually on a sticker on the driver-side door jamb, or on a plate on the dashboard visible through the windshield. " +
+    "Ignore all other numbers — license plates, unit numbers, part numbers, barcodes. " +
+    "Return ONLY the 17-character VIN with no spaces, dashes, or extra text. " +
+    "If you cannot find a valid 17-character VIN, return NOTFOUND."
+  );
   const clean = raw.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,"");
   return clean.length===17?clean:null;
+}
+
+async function readUnitNumberFromImage(file) {
+  const raw = await geminiVision(file,
+    "Your only job: find and read the FLEET UNIT NUMBER on this NW Natural utility vehicle. " +
+    "The unit number is a short number (usually 2–6 digits) painted in large characters or on a sticker on the door, hood, or cab. " +
+    "It is NOT the license plate, NOT the VIN, NOT a phone number, NOT a road sign. " +
+    "Return ONLY the unit number digits, nothing else. " +
+    "If you cannot find a unit number, return NOTFOUND."
+  );
+  const clean = raw.toUpperCase().replace(/[^A-Z0-9\-]/g,"").replace(/^NOTFOUND$/, "");
+  if (!clean || clean.length < 1) {
+    if (!lastGeminiError) lastGeminiError = raw ? ("Got: "+raw.substring(0,80)) : "No text in response";
+  }
+  return clean && clean.length >= 1 ? clean : null;
+}
+
+async function readPlateAndUnitFromImage(file) {
+  const raw = await geminiVision(file,
+    "This photo shows a fleet vehicle. Find TWO things and return them on separate lines:\n" +
+    "LINE 1: The LICENSE PLATE characters only (the metal tag with letters/numbers on front or rear). Write: PLATE:<characters>\n" +
+    "LINE 2: The UNIT NUMBER (short 2–6 digit fleet number painted large on the door, hood, or cab). Write: UNIT:<number>\n" +
+    "If you cannot find one of them, write NOTFOUND for that line.\n" +
+    "Example output:\nPLATE:ABC123\nUNIT:4521\n" +
+    "Return ONLY these two lines, nothing else."
+  );
+  const plateMatch = raw.match(/PLATE:([A-Z0-9]{2,10})/i);
+  const unitMatch  = raw.match(/UNIT:([A-Z0-9\-]{1,10})/i);
+  return {
+    plate: plateMatch ? plateMatch[1].toUpperCase().replace(/[^A-Z0-9]/g,"") : null,
+    unit:  unitMatch  ? unitMatch[1].toUpperCase().replace(/[^A-Z0-9\-]/g,"") : null,
+  };
 }
 
 async function decodeVin(vin) {
@@ -396,8 +442,8 @@ function ConfirmationCard({ data, sheetStatus, sheetAction, onReset }) {
         </div>
       )}
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-        {[{label:"License Plate",img:data.platePhoto?.url},{label:"VIN Photo",img:data.vinPhoto?.url}].map(({label,img})=>(
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:12 }}>
+        {[{label:"License Plate",img:data.platePhoto?.url},{label:"Unit Number",img:data.truckPhoto?.url},{label:"VIN Photo",img:data.vinPhoto?.url}].map(({label,img})=>(
           <div key={label}>
             <img src={img} alt={label} style={{ width:"100%", aspectRatio:"1", objectFit:"cover", borderRadius:4, border:"1px solid var(--border)", display:"block" }} />
             <p style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", marginTop:5, textTransform:"uppercase", letterSpacing:"0.08em" }}>{label}</p>
@@ -406,7 +452,7 @@ function ConfirmationCard({ data, sheetStatus, sheetAction, onReset }) {
       </div>
 
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:4, padding:"14px 16px", marginBottom:14 }}>
-        {[["PLATE",data.plate],["DEPARTMENT",data.department],["LOCATION",data.location],...(data.submittedBy?[["SUBMITTED BY",data.submittedBy]]:[]),...(data.assignedTo?[["ASSIGNED TO",data.assignedTo]]:[]),...(data.notes?[["NOTES",data.notes]]:[])].filter(([,v])=>v).map(([k,v])=>(
+        {[["PLATE",data.plate],["UNIT #",data.unitNumber],["DEPARTMENT",data.department],["LOCATION",data.location],...(data.submittedBy?[["SUBMITTED BY",data.submittedBy]]:[]),...(data.assignedTo?[["ASSIGNED TO",data.assignedTo]]:[]),...(data.notes?[["NOTES",data.notes]]:[])].filter(([,v])=>v).map(([k,v])=>(
           <div key={k} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", padding:"8px 0", borderBottom:"1px solid var(--border)" }}>
             <span style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.08em", flexShrink:0, marginRight:16 }}>{k}</span>
             <span style={{ fontFamily:k==="PLATE"?"var(--mono)":"var(--body)", fontSize:k==="PLATE"?13:15, fontWeight:600, color:"var(--text)", textAlign:"right" }}>{v}</span>
@@ -434,9 +480,17 @@ function App() {
   const [platePhoto,   setPlatePhoto]   = useState(null);
   const [plateError,   setPlateError]   = useState("");
   const [vinPhoto,     setVinPhoto]     = useState(null);
+  const [truckPhoto,   setTruckPhoto]   = useState(null);
+  const [truckError,   setTruckError]   = useState("");
+  const [comboMode,    setComboMode]    = useState(false);
+  const [comboPhoto,   setComboPhoto]   = useState(null);
+  const [comboScanState, setComboScanState] = useState("idle");
   const [plateScanState, setPlateScanState] = useState("idle");
   const [detectedPlate,  setDetectedPlate]  = useState("");
   const [manualPlate,    setManualPlate]    = useState("");
+  const [truckScanState, setTruckScanState] = useState("idle");
+  const [detectedTruck,  setDetectedTruck]  = useState("");
+  const [manualTruck,    setManualTruck]    = useState("");
   const [vinScanState, setVinScanState] = useState("idle");
   const [detectedVin,  setDetectedVin]  = useState("");
   const [vehicleInfo,  setVehicleInfo]  = useState(null);
@@ -446,6 +500,22 @@ function App() {
   const [location,     setLocation]     = useState("");
   const [assignedTo,   setAssignedTo]   = useState("");
   const [notes,        setNotes]        = useState("");
+  const [assetType,    setAssetType]    = useState("vehicle");
+
+  const isFamilyPilot = department === "Dear Friends and Family";
+  const isTrailer     = assetType  === "trailer";
+  const skipUnit      = isFamilyPilot || isTrailer || comboMode;
+
+  // Build visible steps dynamically based on context
+  const allSteps = [
+    { id:"plate",   label:"License Plate", short:"PLATE",  num:"01" },
+    { id:"unit",    label:"Unit Number",   short:"UNIT #", num:"02", skip: skipUnit && !comboMode },
+    { id:"vin",     label:"VIN",           short:"VIN",    num:"03" },
+    { id:"details", label:"Details",       short:"DETAILS",num:"04" },
+  ];
+  const visibleSteps = allSteps.filter(s => !s.skip);
+  // Map visible step index → real step id
+  const currentStepId = visibleSteps[step]?.id;
   const [submitted,    setSubmitted]    = useState(false);
   const [sheetStatus,  setSheetStatus]  = useState("no-sheet");
   const [sheetAction,  setSheetAction]  = useState("");
@@ -464,18 +534,56 @@ function App() {
     loadConfig();
   }, []);
 
-  const canAdvance = [
-    plateScanState==="done"||plateScanState==="no_read",
-    vinScanState==="done"  ||vinScanState==="no_read",
-    !!(submittedBy&&department&&location),
-  ][step]??false;
+  const canAdvance = (() => {
+    if (currentStepId==="plate") return comboMode
+      ? (plateScanState==="done"||(plateScanState==="no_read"&&manualPlate.trim().length>=2)) &&
+        (truckScanState==="done"||(truckScanState==="no_read"&&manualTruck.trim().length>=1))
+      : plateScanState==="done"||(plateScanState==="no_read"&&manualPlate.trim().length>=2);
+    if (currentStepId==="unit")    return truckScanState==="done"||(truckScanState==="no_read"&&manualTruck.trim().length>=1);
+    if (currentStepId==="vin")     return isTrailer
+      ? vinScanState==="done"||(vinScanState==="no_read"&&manualVin.trim().length>=1)
+      : vinScanState==="done"||(vinScanState==="no_read"&&manualVin.trim().length===17);
+    if (currentStepId==="details") return !!(submittedBy&&department&&location);
+    return false;
+  })();
 
   const handlePlateCapture = async data => {
-    setPlatePhoto(data); setPlateScanState("reading"); setDetectedPlate(""); setManualPlate("");
+    setPlatePhoto(data); setPlateScanState("reading"); setDetectedPlate(""); setManualPlate(""); setPlateError("");
     try {
       const plate = await readPlateFromImage(data.file);
       plate ? (setDetectedPlate(plate),setPlateScanState("done")) : (setPlateError(lastGeminiError),setPlateScanState("no_read"));
     } catch(e) { setPlateError(e.message); setPlateScanState("no_read"); }
+  };
+
+  const handleComboCapture = async data => {
+    setComboPhoto(data); setComboScanState("reading");
+    setDetectedPlate(""); setManualPlate(""); setPlateError("");
+    setDetectedTruck(""); setManualTruck(""); setTruckError("");
+    setPlatePhoto(data); setTruckPhoto(data);
+    try {
+      const result = await readPlateAndUnitFromImage(data.file);
+      if (result.plate) { setDetectedPlate(result.plate); setPlateScanState("done"); }
+      else { setPlateScanState("no_read"); }
+      if (result.unit)  { setDetectedTruck(result.unit);  setTruckScanState("done"); }
+      else { setTruckScanState("no_read"); }
+      setComboScanState("done");
+    } catch(e) {
+      setComboScanState("no_read");
+      setPlateScanState("no_read"); setTruckScanState("no_read");
+    }
+  };
+
+  const handleTruckCapture = async data => {
+    setTruckPhoto(data); setTruckScanState("reading"); setDetectedTruck(""); setManualTruck(""); setTruckError("");
+    try {
+      const unit = await readUnitNumberFromImage(data.file);
+      unit ? (setDetectedTruck(unit), setTruckScanState("done")) : (setTruckError(lastGeminiError), setTruckScanState("no_read"));
+    } catch(e) { setTruckError(e.message); setTruckScanState("no_read"); }
+  };
+
+  const handleManualTruck = () => {
+    if (!manualTruck.trim()) return;
+    setDetectedTruck(manualTruck.trim().toUpperCase()); setTruckScanState("done");
   };
 
   const handleVinCapture = async data => {
@@ -496,12 +604,13 @@ function App() {
   };
 
   const handleManualVin = async () => {
-    if (manualVin.length!==17) return;
-    setVinScanState("decoding"); setDetectedVin(manualVin); setExistingRecord(null);
+    const sanitized = manualVin.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,"");
+    if (sanitized.length!==17) return;
+    setVinScanState("decoding"); setDetectedVin(sanitized); setExistingRecord(null);
     try {
-      const info = await decodeVin(manualVin);
+      const info = await decodeVin(sanitized);
       setVehicleInfo(info); setVinScanState("done");
-      checkForDuplicate(manualVin, detectedPlate||manualPlate);
+      checkForDuplicate(sanitized, detectedPlate||manualPlate);
     } catch { setVinScanState("no_read"); }
   };
 
@@ -514,10 +623,13 @@ function App() {
   };
 
   const reset = () => {
-    setStep(0); setPlatePhoto(null); setVinPhoto(null);
-    setPlateScanState("idle"); setDetectedPlate(""); setManualPlate("");
+    setStep(0); setPlatePhoto(null); setVinPhoto(null); setTruckPhoto(null);
+    setComboMode(false); setComboPhoto(null); setComboScanState("idle");
+    setPlateScanState("idle"); setDetectedPlate(""); setManualPlate(""); setPlateError("");
+    setTruckScanState("idle"); setDetectedTruck(""); setManualTruck(""); setTruckError("");
     setVinScanState("idle");   setDetectedVin("");   setVehicleInfo(null); setManualVin("");
     setSubmittedBy(""); setDepartment(""); setLocation(""); setAssignedTo(""); setNotes("");
+    setAssetType("vehicle");
     setSubmitted(false); setSheetStatus("no-sheet"); setSheetAction(""); setExistingRecord(null);
   };
 
@@ -531,12 +643,14 @@ function App() {
           timestamp:    new Date().toLocaleString(),
           vin:          detectedVin  ||manualVin  ||"",
           licensePlate: detectedPlate||manualPlate||"",
+          unitNumber:   detectedTruck||manualTruck||"",
           year:         vehicleInfo?.year||"",      make:vehicleInfo?.make||"",
           model:        vehicleInfo?.model||"",     trim:vehicleInfo?.trim||"",
           body:         vehicleInfo?.body||"",      engine:vehicleInfo?.engine||"",
           cylinders:    vehicleInfo?.cylinders||"", drive:vehicleInfo?.drive||"",
           fuel:         vehicleInfo?.fuel||"",
           submittedBy, department, location, assignedTo, notes,
+          assetType,
           platePhotoUrl:"Captured on device", vinPhotoUrl:"Captured on device",
           source:"FleetBuddy v2.0",
         })
@@ -575,14 +689,14 @@ function App() {
 
         {submitted ? (
           <ConfirmationCard
-            data={{ platePhoto, vinPhoto, plate:detectedPlate||manualPlate, vin:detectedVin||manualVin, vehicleInfo, submittedBy, department, location, assignedTo, notes }}
+            data={{ platePhoto, vinPhoto, truckPhoto, plate:detectedPlate||manualPlate, unitNumber:detectedTruck||manualTruck, vin:detectedVin||manualVin, vehicleInfo, submittedBy, department, location, assignedTo, notes }}
             sheetStatus={sheetStatus} sheetAction={sheetAction} onReset={reset}
           />
         ) : (
           <>
             {/* Step tracker */}
             <div style={{ display:"flex", alignItems:"center", marginBottom:24 }}>
-              {steps.map((s,i) => {
+              {visibleSteps.map((s,i) => {
                 const done=i<step, cur=i===step;
                 return (
                   <React.Fragment key={s.id}>
@@ -597,7 +711,7 @@ function App() {
                       }}>{done?"✓":s.num}</div>
                       <div style={{ fontFamily:"var(--mono)", fontSize:9, letterSpacing:"0.07em", textTransform:"uppercase", whiteSpace:"nowrap", color:cur?"var(--cyan)":done?"rgba(0,212,255,0.45)":"var(--muted)", fontWeight:cur?600:400 }}>{s.short}</div>
                     </div>
-                    {i<steps.length-1 && (
+                    {i<visibleSteps.length-1 && (
                       <div style={{ flex:1, height:1, margin:"0 6px", marginBottom:20, background:done?"rgba(0,212,255,0.35)":"var(--border)", transition:"background 0.3s" }} />
                     )}
                   </React.Fragment>
@@ -609,52 +723,172 @@ function App() {
             <BracketCard style={{ marginBottom:14 }}>
               <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:18 }}>
                 <div style={{ fontFamily:"var(--display)", fontSize:32, fontWeight:800, letterSpacing:"0.08em", color:"var(--text)", lineHeight:1 }}>
-                  {steps[step].label.toUpperCase()}
+                  {visibleSteps[step]?.label.toUpperCase()}
                 </div>
-                <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em" }}>STEP {step+1}/{steps.length}</div>
+                <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em" }}>STEP {step+1}/{visibleSteps.length}</div>
               </div>
 
-              {/* STEP 0 — Plate */}
-              {step===0 && (
+              {/* STEP — Plate (+ optional combo) */}
+              {currentStepId==="plate" && (
                 <div className="animate-in">
-                  <div style={{ background:"rgba(0,212,255,0.04)", border:"1px solid rgba(0,212,255,0.1)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
-                    <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--cyan)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>AI</span>
-                    <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
-                      Claude reads the plate directly from your photo. OR and WA plates supported.
-                    </p>
+                  {/* Mode toggle */}
+                  <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+                    <button onClick={()=>{ setComboMode(false); setComboPhoto(null); setComboScanState("idle"); }}
+                      style={{ flex:1, padding:"9px", borderRadius:3, border:"none", cursor:"pointer", fontFamily:"var(--mono)", fontSize:10, fontWeight:700, letterSpacing:"0.08em",
+                        background:!comboMode?"var(--cyan)":"var(--surface2)",
+                        color:!comboMode?"#000":"var(--muted)",
+                        boxShadow:!comboMode?"0 0 12px rgba(0,212,255,0.3)":"none" }}>
+                      PLATE ONLY
+                    </button>
+                    <button onClick={()=>{ setComboMode(true); setPlatePhoto(null); setTruckPhoto(null); setPlateScanState("idle"); setTruckScanState("idle"); }}
+                      style={{ flex:1, padding:"9px", borderRadius:3, border:"none", cursor:"pointer", fontFamily:"var(--mono)", fontSize:10, fontWeight:700, letterSpacing:"0.08em",
+                        background:comboMode?"var(--amber)":"var(--surface2)",
+                        color:comboMode?"#000":"var(--muted)",
+                        boxShadow:comboMode?"0 0 12px rgba(255,184,0,0.3)":"none" }}>
+                      PLATE + UNIT # COMBO
+                    </button>
                   </div>
-                  <CameraCapture label="License Plate" hint="Fill the frame — every character must be legible" onCapture={handlePlateCapture} captured={platePhoto} />
-                  <ScanStatus state={plateScanState} label="License Plate" value={detectedPlate} />
-                  {plateScanState==="no_read" && <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate} onSubmit={handleManualPlate} btnLabel="CONFIRM PLATE →" maxLen={10} />}
-                  {plateScanState==="no_read"&&plateError && <p style={{ fontFamily:"var(--mono)", color:"var(--red)", fontSize:10, marginTop:8, wordBreak:"break-all" }}>{plateError}</p>}
+
+                  {!comboMode ? (
+                    <>
+                      <div style={{ background:"rgba(0,212,255,0.04)", border:"1px solid rgba(0,212,255,0.1)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
+                        <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--cyan)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>AI</span>
+                        <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
+                          Zoom in close — license plate only in frame. OR and WA plates supported.
+                        </p>
+                      </div>
+                      <CameraCapture label="License Plate" hint="Fill the frame with the plate — nothing else" onCapture={handlePlateCapture} captured={platePhoto} />
+                      <ScanStatus state={plateScanState} label="License Plate" value={detectedPlate} />
+                      {plateScanState==="no_read" && <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate} onSubmit={handleManualPlate} btnLabel="CONFIRM PLATE →" maxLen={10} />}
+                      {plateScanState==="no_read"&&plateError && <p style={{ fontFamily:"var(--mono)", color:"var(--red)", fontSize:10, marginTop:8, wordBreak:"break-all" }}>{plateError}</p>}
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ background:"rgba(255,184,0,0.04)", border:"1px solid rgba(255,184,0,0.15)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
+                        <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>AI</span>
+                        <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
+                          Stand back and capture both the license plate AND the unit number in one shot. AI will read both at once — skips the next step!
+                        </p>
+                      </div>
+                      <CameraCapture label="Plate + Unit Number" hint="Get the whole rear or side of the truck — both the plate and the painted unit number visible" onCapture={handleComboCapture} captured={comboPhoto} />
+
+                      {comboScanState==="reading" && (
+                        <div className="animate-in" style={{ background:"rgba(255,184,0,0.05)", border:"1px solid rgba(255,184,0,0.18)", borderRadius:4, padding:"14px 16px", marginTop:12, display:"flex", alignItems:"center", gap:14 }}>
+                          <div style={{ width:16, height:16, border:"2px solid var(--amber)", borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.75s linear infinite", flexShrink:0 }} />
+                          <div>
+                            <div style={{ fontFamily:"var(--display)", fontSize:16, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)" }}>SCANNING PLATE + UNIT #</div>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>AI reading both at once...</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {comboScanState==="done" && (
+                        <div className="animate-in" style={{ marginTop:12, display:"flex", flexDirection:"column", gap:8 }}>
+                          <ScanStatus state={plateScanState} label="License Plate" value={detectedPlate} />
+                          {plateScanState==="no_read" && <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate} onSubmit={handleManualPlate} btnLabel="CONFIRM PLATE →" maxLen={10} />}
+                          <ScanStatus state={truckScanState} label="Unit Number" value={detectedTruck} />
+                          {truckScanState==="no_read" && <ManualEntry label="unit number" value={manualTruck} setValue={setManualTruck} onSubmit={handleManualTruck} btnLabel="CONFIRM UNIT # →" maxLen={10} />}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
 
-              {/* STEP 1 — VIN */}
-              {step===1 && (
+              {/* STEP — Unit Number */}
+              {currentStepId==="unit" && (
                 <div className="animate-in">
-                  <div style={{ background:"rgba(0,212,255,0.04)", border:"1px solid rgba(0,212,255,0.1)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
-                    <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--cyan)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>AI</span>
-                    <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
-                      Claude reads the VIN, then NHTSA returns year, make, model, trim, engine, drive &amp; fuel.
-                    </p>
-                  </div>
-                  <CameraCapture label="VIN" hint="Dashboard VIN near windshield or driver-side door jamb sticker" onCapture={handleVinCapture} captured={vinPhoto} />
-                  <ScanStatus state={vinScanState} label="VIN" value={detectedVin} isVin />
-                  {vinScanState==="done" && <VehicleCard info={vehicleInfo} vin={detectedVin} />}
-                  {vinScanState==="no_read" && <ManualEntry label="VIN (17 characters)" value={manualVin} setValue={setManualVin} onSubmit={handleManualVin} btnLabel="DECODE VIN →" maxLen={17} />}
+                  {comboMode && truckScanState==="done" ? (
+                    <>
+                      <div style={{ background:"rgba(0,232,122,0.04)", border:"1px solid rgba(0,232,122,0.2)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
+                        <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--green)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>✓</span>
+                        <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
+                          Unit number captured from your combo photo. Hit NEXT or retake below.
+                        </p>
+                      </div>
+                      <ScanStatus state="done" label="Unit Number" value={detectedTruck} />
+                      <button onClick={()=>{ setComboMode(false); setTruckScanState("idle"); setDetectedTruck(""); setTruckPhoto(null); }}
+                        style={{ marginTop:12, width:"100%", background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:3, padding:"11px", color:"var(--muted)", fontFamily:"var(--mono)", fontSize:10, cursor:"pointer", letterSpacing:"0.08em" }}>
+                        RETAKE SEPARATELY
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ background:"rgba(255,184,0,0.04)", border:"1px solid rgba(255,184,0,0.12)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
+                        <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>AI</span>
+                        <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
+                          Zoom in on the unit number only. Usually 2–6 digits painted large on the door, hood, or cab.
+                        </p>
+                      </div>
+                      <CameraCapture label="Unit Number" hint="Unit number only in frame — not the plate, not the VIN" onCapture={handleTruckCapture} captured={truckPhoto} />
+                      <ScanStatus state={truckScanState} label="Unit Number" value={detectedTruck} />
+                      {truckScanState==="no_read" && <ManualEntry label="unit number" value={manualTruck} setValue={setManualTruck} onSubmit={handleManualTruck} btnLabel="CONFIRM UNIT # →" maxLen={10} />}
+                      {truckScanState==="no_read"&&truckError && <p style={{ fontFamily:"var(--mono)", color:"var(--red)", fontSize:10, marginTop:8, wordBreak:"break-all" }}>{truckError}</p>}
+                    </>
+                  )}
                 </div>
               )}
 
-              {/* STEP 2 — Details */}
-              {step===2 && (
+              {/* STEP — VIN */}
+              {currentStepId==="vin" && (
+                <div className="animate-in">
+                  {isTrailer ? (
+                    <>
+                      <div style={{ background:"rgba(255,184,0,0.04)", border:"1px solid rgba(255,184,0,0.12)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
+                        <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>🚛</span>
+                        <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
+                          Capture the trailer VIN or ID plate. No vehicle decode for trailers — just the number is recorded.
+                        </p>
+                      </div>
+                      <CameraCapture label="Trailer VIN / ID" hint="VIN plate on the tongue, frame rail, or front wall of the trailer" onCapture={handleVinCapture} captured={vinPhoto} />
+                      <ScanStatus state={vinScanState} label="Trailer VIN" value={detectedVin} isVin />
+                      {vinScanState==="no_read" && <ManualEntry label="trailer VIN or ID number" value={manualVin} setValue={setManualVin} onSubmit={()=>{ if(manualVin.trim()) { setDetectedVin(manualVin.trim().toUpperCase()); setVinScanState("done"); }}} btnLabel="CONFIRM ID →" maxLen={20} />}
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ background:"rgba(0,212,255,0.04)", border:"1px solid rgba(0,212,255,0.1)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
+                        <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--cyan)", letterSpacing:"0.08em", flexShrink:0, marginTop:1 }}>AI</span>
+                        <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>
+                          AI vision reads the VIN, then NHTSA returns year, make, model, trim, engine, drive &amp; fuel.
+                        </p>
+                      </div>
+                      <CameraCapture label="VIN" hint="Dashboard VIN near windshield or driver-side door jamb sticker" onCapture={handleVinCapture} captured={vinPhoto} />
+                      <ScanStatus state={vinScanState} label="VIN" value={detectedVin} isVin />
+                      {vinScanState==="done" && <VehicleCard info={vehicleInfo} vin={detectedVin} />}
+                      {vinScanState==="no_read" && <ManualEntry label="VIN (17 characters)" value={manualVin} setValue={setManualVin} onSubmit={handleManualVin} btnLabel="DECODE VIN →" maxLen={17} />}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* STEP — Details */}
+              {currentStepId==="details" && (
                 <div className="animate-in" style={{ display:"flex", flexDirection:"column", gap:16 }}>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+
+                  {/* Asset type selector */}
+                  <div>
+                    <label className="field-label">Asset Type</label>
+                    <div style={{ display:"flex", gap:8 }}>
+                      {[{val:"vehicle",label:"🚗  Vehicle"},{val:"trailer",label:"🚛  Trailer"}].map(({val,label})=>(
+                        <button key={val} onClick={()=>setAssetType(val)} style={{
+                          flex:1, padding:"11px", borderRadius:3, border:"none", cursor:"pointer",
+                          fontFamily:"var(--body)", fontSize:15, fontWeight:700,
+                          background:assetType===val?"var(--cyan)":"var(--surface2)",
+                          color:assetType===val?"#000":"var(--muted)",
+                          boxShadow:assetType===val?"0 0 12px rgba(0,212,255,0.25)":"none",
+                          transition:"all 0.2s"
+                        }}>{label}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
                     <DataTag label="License Plate" value={detectedPlate||manualPlate} color="var(--cyan)" />
+                    <DataTag label="Unit #" value={detectedTruck||manualTruck||"—"} color="var(--amber)" />
                     <DataTag label="VIN" value={(detectedVin||manualVin)?.length>9?(detectedVin||manualVin).slice(0,9)+"…":(detectedVin||manualVin)} color="var(--green)" />
                   </div>
 
-                  {vehicleInfo && (
+                  {vehicleInfo && !isTrailer && (
                     <div style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:4, padding:"12px 14px" }}>
                       <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Decoded Vehicle</div>
                       <div style={{ fontFamily:"var(--display)", fontSize:20, fontWeight:700, letterSpacing:"0.04em" }}>{vehicleInfo.year} {vehicleInfo.make} {vehicleInfo.model}</div>
@@ -672,6 +906,12 @@ function App() {
                       <option value="">Select department...</option>
                       {departments.map(d=><option key={d} value={d}>{d}</option>)}
                     </select>
+                    {isFamilyPilot && (
+                      <div style={{ marginTop:8, background:"rgba(0,232,122,0.05)", border:"1px solid rgba(0,232,122,0.2)", borderRadius:3, padding:"8px 12px", display:"flex", gap:8, alignItems:"center" }}>
+                        <span style={{ fontSize:16 }}>💚</span>
+                        <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--green)", letterSpacing:"0.06em" }}>PILOT MODE · Unit # step skipped — thanks for helping test FleetBuddy!</span>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="field-label">Resource Center / Location <span style={{ color:"var(--red)" }}>*</span></label>
@@ -702,7 +942,9 @@ function App() {
                     <span style={{ fontSize:14 }}>📊</span>
                     <div>
                       <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--green)", letterSpacing:"0.08em" }}>READY TO SYNC</div>
-                      <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", marginTop:2 }}>Plate · VIN · Vehicle · Dept · Location</div>
+                      <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", marginTop:2 }}>
+                        {isTrailer ? "Plate · Trailer VIN · Dept · Location" : "Plate · Unit # · VIN · Vehicle · Dept · Location"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -719,7 +961,7 @@ function App() {
                 }}>← BACK</button>
               )}
               <button
-                onClick={()=>{ if(step<2) setStep(s=>s+1); else handleSubmit(); }}
+                onClick={()=>{ if(step<visibleSteps.length-1) setStep(s=>s+1); else handleSubmit(); }}
                 disabled={!canAdvance}
                 style={{
                   flex:2, border:"none", borderRadius:3, padding:"15px",
@@ -730,7 +972,7 @@ function App() {
                   boxShadow:canAdvance?"0 4px 24px rgba(0,212,255,0.25)":"none"
                 }}
               >
-                {step<2?"NEXT →":existingRecord?"UPDATE VEHICLE ✓":"SUBMIT VEHICLE ✓"}
+                {step<visibleSteps.length-1?"NEXT →":existingRecord?"UPDATE VEHICLE ✓":"SUBMIT VEHICLE ✓"}
               </button>
             </div>
           </>
