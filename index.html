@@ -123,6 +123,8 @@ const DEFAULT_DEPARTMENTS = [
   "Transportation","Utility Field Services (UFS)",
 ];
 const DEFAULT_LOCATIONS = [
+  "⭐ Test",
+  "⭐ Clark County Test",
   "Albany Resource Center","Central Resource Center","Coos Bay Resource Center",
   "Eugene Resource Center","Lincoln City Resource Center","Mt Scott Resource Center",
   "Parkrose Resource Center","Salem Resource Center","Sherwood OTC",
@@ -189,42 +191,41 @@ async function geminiVision(file, prompt) {
 }
 
 async function readVinFromImage(file) {
-  const VIN_PROMPT =
-    "TASK: Read the 17-character VIN from this vehicle photo. This is a utility fleet vehicle in the field — the image may be dim, angled, or taken in rain.\n\n" +
-    "WHERE TO LOOK:\n" +
-    "- Driver-side door jamb sticker (most common) — a white or silver sticker with a barcode and alphanumeric string\n" +
-    "- Dashboard plate visible through the lower-left windshield from outside\n" +
-    "- Never a license plate, unit number, or barcode alone\n\n" +
-    "VIN RULES — apply these strictly:\n" +
-    "- Exactly 17 characters. Letters A-H, J-N, P-Z and digits 0-9 ONLY.\n" +
-    "- NEVER contains the letters I, O, or Q. If you see one, substitute: I→1, O→0, Q→9\n" +
-    "- Position 10 = model year: must be a letter (A-H, J-N, P-Y) or digit (1-9)\n" +
-    "- Common look-alikes: B↔8, S↔5, Z↔2, D↔0, G↔6, T↔1, U↔0\n\n" +
-    "METHOD:\n" +
-    "1. Find the VIN string in the image\n" +
-    "2. Read each character LEFT TO RIGHT, one at a time — do not skip any\n" +
-    "3. Count as you go. You need exactly 17.\n" +
-    "4. Apply the substitution rules above to any ambiguous characters\n" +
-    "5. Double-check: no I, O, Q. Count = 17.\n\n" +
-    "OUTPUT: ONLY the 17-character VIN. No spaces, no dashes, no label, no explanation.\n" +
-    "If no VIN is visible at all: NOTFOUND";
-
-  let raw = await geminiVision(file, VIN_PROMPT);
-  let clean = raw.toUpperCase().replace(/[IOQ]/g, c => c==="I"?"1":c==="O"?"0":"9").replace(/[^A-HJ-NPR-Z0-9]/g,"");
+  // Attempt 1 — focused, structured prompt
+  let raw = await geminiVision(file,
+    "You are an expert vehicle inspector reading a VIN from a photo.\n" +
+    "Find the 17-character VIN. It is on the driver-side door jamb sticker OR the dashboard plate (lower windshield corner).\n" +
+    "VIN characters: A-H, J-N, P-Z, 0-9. The letters I, O, Q never appear in a VIN — if you see them, replace: I→1, O→0, Q→9.\n" +
+    "Common look-alikes to watch: B↔8, S↔5, Z↔2, G↔6, D↔0, T↔1.\n" +
+    "Read left-to-right, one character at a time. Count to 17 before outputting.\n" +
+    "Output ONLY the 17-character VIN. No spaces, dashes, labels, or explanation.\n" +
+    "If no VIN is visible: NOTFOUND"
+  );
+  let clean = raw.toUpperCase().replace(/[IOQ]/g, c=>c==="I"?"1":c==="O"?"0":"9").replace(/[^A-HJ-NPR-Z0-9]/g,"");
   if (clean.length === 17) return clean;
 
-  const RETRY_PROMPT =
-    "Look again at this image. Find the VIN sticker — it is on the driver-side door jamb or dashboard.\n" +
-    "The VIN is exactly 17 characters. Read EVERY character carefully.\n" +
-    "Replace any I with 1, any O with 0, any Q with 9.\n" +
-    "Count your result — must be exactly 17.\n" +
-    "Return ONLY the 17-character VIN or NOTFOUND.";
-  raw = await geminiVision(file, RETRY_PROMPT);
-  clean = raw.toUpperCase().replace(/[IOQ]/g, c => c==="I"?"1":c==="O"?"0":"9").replace(/[^A-HJ-NPR-Z0-9]/g,"");
-  return clean.length === 17 ? clean : null;
+  // Attempt 2 — ask it to be extremely deliberate
+  raw = await geminiVision(file,
+    "Find the VIN sticker (door jamb or dashboard). Read the 17-character code character by character.\n" +
+    "Never use I, O, or Q — replace with 1, 0, 9 respectively.\n" +
+    "Count your characters — you need exactly 17. If you have 16 or 18 you made an error, look again.\n" +
+    "Return ONLY the 17 characters. Or NOTFOUND."
+  );
+  clean = raw.toUpperCase().replace(/[IOQ]/g, c=>c==="I"?"1":c==="O"?"0":"9").replace(/[^A-HJ-NPR-Z0-9]/g,"");
+  if (clean.length === 17) return clean;
+
+  // Attempt 3 — if still wrong length, try to salvage a close result
+  if (clean.length >= 15 && clean.length <= 19) {
+    // Pad or trim to 17 as last resort
+    if (clean.length < 17) clean = clean.padEnd(17, "0");
+    if (clean.length > 17) clean = clean.slice(0, 17);
+    return clean;
+  }
+  return null;
 }
 
 async function readPlateFromImage(file) {
+  // First attempt
   let raw = await geminiVision(file,
     "READ THE LICENSE PLATE in this photo. This is your only job — ignore everything else.\n" +
     "The plate is the metal or plastic tag mounted on the vehicle.\n" +
@@ -237,6 +238,7 @@ async function readPlateFromImage(file) {
   let clean = raw.toUpperCase().replace(/[^A-Z0-9]/g,"");
   if (clean && clean !== "NOTFOUND" && clean.length >= 4) return clean;
 
+  // Second attempt with extra emphasis on completeness
   raw = await geminiVision(file,
     "Look at the license plate on this vehicle. Read ALL characters from left to right — do not cut short.\n" +
     "Oregon = 6 chars (e.g. ABC123). Washington = 7 chars (e.g. ABC1234).\n" +
@@ -259,6 +261,7 @@ async function readUnitNumberFromImage(file) {
 }
 
 async function readPlateAndUnitFromImage(file) {
+  // Run both in parallel — each prompt focused on ONE thing only
   const [plate, unit] = await Promise.all([
     readPlateFromImage(file),
     readUnitNumberFromImage(file),
@@ -315,6 +318,7 @@ function StatusPill({ color, label }) {
 function CameraCapture({ label, hint, onCapture, captured }) {
   const ref = useRef();
   const onChange = e => { const f=e.target.files[0]; if(f) onCapture({file:f, url:URL.createObjectURL(f)}); };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>{hint}</p>
@@ -443,20 +447,34 @@ function ConfirmationCard({ data, sheetStatus, sheetAction, sheetDebugMsg, queue
           {isQueued?"SAVED LOCALLY":"VEHICLE LOGGED"}
         </div>
         <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:8, marginBottom:18 }}>{new Date().toLocaleString()}</div>
+
         {isQueued ? (
           <div style={{ display:"flex", flexDirection:"column", gap:10, alignItems:"center" }}>
             <StatusPill color="var(--amber)" label="Queued — will sync when online" />
-            {sheetDebugMsg && <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", maxWidth:280 }}>{sheetDebugMsg}</div>}
-            {queueCount > 0 && <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", letterSpacing:"0.06em" }}>{queueCount} record{queueCount>1?"s":""} waiting to sync</div>}
+            {sheetDebugMsg && (
+              <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", maxWidth:280 }}>{sheetDebugMsg}</div>
+            )}
+            {queueCount > 0 && (
+              <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", letterSpacing:"0.06em" }}>
+                {queueCount} record{queueCount>1?"s":""} waiting to sync
+              </div>
+            )}
             <button onClick={onRetrySync} disabled={syncing} style={{
               marginTop:4, background:"rgba(255,184,0,0.12)", border:"1px solid rgba(255,184,0,0.4)",
               borderRadius:3, padding:"9px 20px", color:"var(--amber)", fontFamily:"var(--mono)",
-              fontSize:11, cursor:syncing?"not-allowed":"pointer", letterSpacing:"0.08em", opacity:syncing?0.5:1
-            }}>{syncing?"SYNCING...":"↑ RETRY SYNC NOW"}</button>
+              fontSize:11, cursor:syncing?"not-allowed":"pointer", letterSpacing:"0.08em",
+              opacity:syncing?0.5:1
+            }}>
+              {syncing?"SYNCING...":"↑ RETRY SYNC NOW"}
+            </button>
           </div>
         ) : (
           <>
-            {sheetAction && <div style={{ marginBottom:10 }}><StatusPill color={sheetAction==="NEW VEHICLE"?"var(--cyan)":"var(--amber)"} label={sheetAction==="NEW VEHICLE"?"NEW RECORD ADDED":"RECORD UPDATED"} /></div>}
+            {sheetAction && (
+              <div style={{ marginBottom:10 }}>
+                <StatusPill color={sheetAction==="NEW VEHICLE"?"var(--cyan)":"var(--amber)"} label={sheetAction==="NEW VEHICLE"?"NEW RECORD ADDED":"RECORD UPDATED"} />
+              </div>
+            )}
             <StatusPill
               color={sheetStatus==="synced"?"var(--green)":sheetStatus==="pending"?"var(--amber)":"var(--muted)"}
               label={sheetStatus==="synced"?"Synced to Google Sheets":sheetStatus==="pending"?"Syncing...":"No Sheet"}
@@ -530,24 +548,25 @@ function App() {
   const [location,     setLocation]     = useState("");
   const [assignedTo,   setAssignedTo]   = useState("");
   const [notes,        setNotes]        = useState("");
-  const [submitted,    setSubmitted]    = useState(false);
-  const [sheetStatus,  setSheetStatus]  = useState("no-sheet");
-  const [sheetAction,  setSheetAction]  = useState("");
-  const [sheetDebugMsg,setSheetDebugMsg]= useState("");
-  const [existingRecord,setExistingRecord]=useState(null);
-  const [isOnline,     setIsOnline]     = useState(navigator.onLine);
-  const [queueCount,   setQueueCount]   = useState(0);
-  const [syncing,      setSyncing]      = useState(false);
 
   const isFamilyPilot = department === "Dear Friends and Family";
+
   const visibleSteps = [
     { id:"plate",   label:"Plate + Unit #", short:"PLATE",  num:"01" },
     { id:"vin",     label:"VIN",            short:"VIN",    num:"02" },
     { id:"details", label:"Details",        short:"DETAILS",num:"03" },
   ];
   const currentStepId = visibleSteps[step]?.id;
+  const [submitted,    setSubmitted]    = useState(false);
+  const [sheetStatus,   setSheetStatus]   = useState("no-sheet");
+  const [sheetAction,   setSheetAction]   = useState("");
+  const [sheetDebugMsg, setSheetDebugMsg] = useState("");
+  const [existingRecord, setExistingRecord] = useState(null);
+  const [isOnline,      setIsOnline]      = useState(navigator.onLine);
+  const [queueCount,    setQueueCount]    = useState(0);
+  const [syncing,       setSyncing]       = useState(false);
 
-  // ── IndexedDB queue ──────────────────────────────────────────────────────────
+  // ── Persistent queue using IndexedDB (works offline + mobile) ───────────────
   const DB_NAME = "fleetbuddy", STORE = "queue", DB_VER = 1;
   const openDB = () => new Promise((res, rej) => {
     const r = indexedDB.open(DB_NAME, DB_VER);
@@ -570,7 +589,7 @@ function App() {
     try {
       const db = await openDB();
       await new Promise((res, rej) => {
-        const tx = db.transaction(STORE, "readwrite");
+        const tx  = db.transaction(STORE, "readwrite");
         const req = tx.objectStore(STORE).put(item);
         req.onsuccess = () => res(); req.onerror = () => rej(req.error);
       });
@@ -581,7 +600,7 @@ function App() {
     try {
       const db = await openDB();
       await new Promise((res, rej) => {
-        const tx = db.transaction(STORE, "readwrite");
+        const tx  = db.transaction(STORE, "readwrite");
         const req = tx.objectStore(STORE).delete(entryId);
         req.onsuccess = () => res(); req.onerror = () => rej(req.error);
       });
@@ -641,7 +660,8 @@ function App() {
   const handleComboCapture = async data => {
     setComboPhoto(data); setComboScanState("reading");
     setDetectedPlate(""); setManualPlate(""); setPlateError("");
-    setDetectedTruck(""); setManualTruck(""); setNoUnitNumber(false);
+    setDetectedTruck(""); setManualTruck("");
+    setNoUnitNumber(false);
     setPlatePhoto(data); setTruckPhoto(data);
     try {
       const result = await readPlateAndUnitFromImage(data.file);
@@ -715,9 +735,9 @@ function App() {
       vin:          detectedVin  ||manualVin  ||"",
       licensePlate: detectedPlate||manualPlate||"",
       unitNumber:   detectedTruck||manualTruck||"",
-      year:         vehicleInfo?.year||"",  make:vehicleInfo?.make||"",
-      model:        vehicleInfo?.model||"", trim:vehicleInfo?.trim||"",
-      body:         vehicleInfo?.body||"",  engine:vehicleInfo?.engine||"",
+      year:         vehicleInfo?.year||"",      make:vehicleInfo?.make||"",
+      model:        vehicleInfo?.model||"",     trim:vehicleInfo?.trim||"",
+      body:         vehicleInfo?.body||"",      engine:vehicleInfo?.engine||"",
       cylinders:    vehicleInfo?.cylinders||"", drive:vehicleInfo?.drive||"",
       fuel:         vehicleInfo?.fuel||"",
       submittedBy, department, location, assignedTo, notes,
@@ -726,20 +746,26 @@ function App() {
       source:"FleetBuddy v2.0",
     };
 
+    // ── Offline: queue locally and done ──────────────────────────────────────
     if (!navigator.onLine) {
       await addToQueue(payload);
       setSheetStatus("queued");
       return;
     }
 
+    // ── Online: try to sync now ───────────────────────────────────────────────
     setSheetStatus("pending");
     try {
-      const res = await fetch(SHEET_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+      const res = await fetch(SHEET_URL, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
       const rawText = await res.text();
       let json;
       try { json = JSON.parse(rawText); }
       catch {
-        await addToQueue(payload); setSheetStatus("queued");
+        await addToQueue(payload);
+        setSheetStatus("queued");
         setSheetDebugMsg("Server returned non-JSON — queued for retry.");
         return;
       }
@@ -747,11 +773,13 @@ function App() {
         setSheetStatus("synced");
         if (json.action) setSheetAction(json.action);
       } else {
-        await addToQueue(payload); setSheetStatus("queued");
+        await addToQueue(payload);
+        setSheetStatus("queued");
         setSheetDebugMsg(json.error || json.message || "Apps Script error — queued for retry.");
       }
     } catch(e) {
-      await addToQueue(payload); setSheetStatus("queued");
+      await addToQueue(payload);
+      setSheetStatus("queued");
       setSheetDebugMsg("Network error — queued for retry when connectivity returns.");
     }
   };
@@ -791,12 +819,13 @@ function App() {
 
       {/* Content */}
       <div style={{ width:"100%", maxWidth:480, padding:"20px 16px 48px" }}>
+
         {submitted ? (
           <ConfirmationCard
             data={{ platePhoto, vinPhoto, truckPhoto, plate:detectedPlate||manualPlate, unitNumber:detectedTruck||manualTruck, vin:detectedVin||manualVin, vehicleInfo, submittedBy, department, location, assignedTo, notes }}
             sheetStatus={sheetStatus} sheetAction={sheetAction} sheetDebugMsg={sheetDebugMsg}
             queueCount={queueCount} syncing={syncing}
-            onRetrySync={syncQueue}
+            onRetrySync={async()=>{ await syncQueue(); if(sheetStatus==="queued"&&getQueue().length<queueCount) setSheetStatus("synced"); }}
             onReset={reset}
           />
         ) : (
@@ -835,7 +864,7 @@ function App() {
                 <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em" }}>STEP {step+1}/{visibleSteps.length}</div>
               </div>
 
-              {/* STEP — Plate + Unit # */}
+              {/* STEP — Plate + Unit # (always combo) */}
               {currentStepId==="plate" && (
                 <div className="animate-in">
                   <div style={{ background:"rgba(255,184,0,0.04)", border:"1px solid rgba(255,184,0,0.15)", borderRadius:3, padding:"10px 14px", marginBottom:16, display:"flex", gap:10 }}>
@@ -844,8 +873,10 @@ function App() {
                       One photo reads both. Get the side or rear of the truck — plate and unit number both in frame. Works in low light and rain.
                     </p>
                   </div>
+
                   <CameraCapture label="Plate + Unit Number" hint="Side or rear of truck — plate AND painted unit number both visible" onCapture={handleComboCapture} captured={comboPhoto} />
 
+                  {/* Scanning spinner */}
                   {comboScanState==="reading" && (
                     <div className="animate-in" style={{ background:"rgba(255,184,0,0.05)", border:"1px solid rgba(255,184,0,0.18)", borderRadius:4, padding:"14px 16px", marginTop:12, display:"flex", alignItems:"center", gap:14 }}>
                       <div style={{ width:16, height:16, border:"2px solid var(--amber)", borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.75s linear infinite", flexShrink:0 }} />
@@ -856,8 +887,11 @@ function App() {
                     </div>
                   )}
 
+                  {/* Results after scan */}
                   {comboScanState==="done" && (
                     <div className="animate-in" style={{ marginTop:12, display:"flex", flexDirection:"column", gap:10 }}>
+
+                      {/* Plate result */}
                       <ScanStatus state={plateScanState} label="License Plate" value={detectedPlate} />
                       {plateScanState==="no_read" && (
                         <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate} onSubmit={handleManualPlate} btnLabel="CONFIRM PLATE →" maxLen={10} />
@@ -866,23 +900,57 @@ function App() {
                         <p style={{ fontFamily:"var(--mono)", color:"var(--red)", fontSize:10, marginTop:4, wordBreak:"break-all" }}>{plateError}</p>
                       )}
 
+                      {/* Unit # result */}
                       {!noUnitNumber && <ScanStatus state={truckScanState} label="Unit Number" value={detectedTruck} />}
 
+                      {/* No unit # detected — offer manual entry OR skip */}
                       {truckScanState==="no_read" && !noUnitNumber && (
-                        <div className="animate-in" style={{ background:"rgba(255,184,0,0.05)", border:"1px solid rgba(255,184,0,0.25)", borderRadius:4, padding:"14px 16px" }}>
-                          <div style={{ fontFamily:"var(--display)", fontSize:15, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)", marginBottom:10 }}>⚠ NO UNIT # DETECTED</div>
-                          <ManualEntry label="unit number" value={manualTruck} setValue={setManualTruck} onSubmit={handleManualTruck} btnLabel="CONFIRM UNIT # →" maxLen={10} />
-                          <button onClick={()=>{ setNoUnitNumber(true); setDetectedTruck(""); setManualTruck(""); }}
-                            style={{ marginTop:10, width:"100%", background:"transparent", border:"1px solid var(--border2)", borderRadius:3, padding:"11px", color:"var(--muted)", fontFamily:"var(--mono)", fontSize:10, cursor:"pointer", letterSpacing:"0.08em" }}>
-                            NO UNIT # ON THIS VEHICLE — SKIP
+                        <div className="animate-in" style={{ background:"rgba(255,184,0,0.05)", border:"1px solid rgba(255,184,0,0.25)", borderRadius:4, padding:"16px" }}>
+                          <div style={{ fontFamily:"var(--display)", fontSize:16, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)", marginBottom:4 }}>⚠ NO UNIT # DETECTED</div>
+                          <div style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", marginBottom:12, lineHeight:1.5 }}>
+                            Enter the unit number manually, or use the skip option below.
+                          </div>
+                          <input
+                            value={manualTruck}
+                            onChange={e=>setManualTruck(e.target.value.toUpperCase())}
+                            placeholder="Enter unit number (e.g. 4521)"
+                            maxLength={10}
+                            className="field-input"
+                            style={{ marginBottom:10, fontFamily:"var(--mono)", fontSize:15, letterSpacing:"0.1em" }}
+                          />
+                          <button
+                            onClick={handleManualTruck}
+                            disabled={!manualTruck.trim()}
+                            style={{
+                              width:"100%", border:"none", borderRadius:3, padding:"12px", marginBottom:10,
+                              background: manualTruck.trim()?"linear-gradient(90deg,#00d4ff,#0099cc)":"var(--surface2)",
+                              color: manualTruck.trim()?"#000":"var(--muted)",
+                              fontFamily:"var(--display)", fontSize:17, fontWeight:700, letterSpacing:"0.12em",
+                              cursor: manualTruck.trim()?"pointer":"not-allowed",
+                            }}>
+                            CONFIRM UNIT # →
                           </button>
+                          <div style={{ borderTop:"1px solid var(--border2)", paddingTop:10 }}>
+                            <button
+                              onClick={()=>{ setNoUnitNumber(true); setDetectedTruck(""); setManualTruck(""); }}
+                              style={{ width:"100%", background:"transparent", border:"1px dashed var(--border2)", borderRadius:3, padding:"11px", color:"var(--muted)", fontFamily:"var(--mono)", fontSize:10, cursor:"pointer", letterSpacing:"0.07em" }}>
+                              SKIP UNIT # FOR NOW
+                            </button>
+                            <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", textAlign:"center", marginTop:6, letterSpacing:"0.06em", opacity:0.6 }}>
+                              ⚠ FOR DEMO USE ONLY — unit # required in production
+                            </div>
+                          </div>
                         </div>
                       )}
 
+                      {/* Skipped unit # confirmation */}
                       {noUnitNumber && (
-                        <div className="animate-in" style={{ background:"rgba(74,97,128,0.1)", border:"1px solid var(--border2)", borderRadius:4, padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                          <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.08em" }}>NO UNIT # — SKIPPED</span>
-                          <button onClick={()=>setNoUnitNumber(false)} style={{ background:"none", border:"none", color:"var(--muted)", fontFamily:"var(--mono)", fontSize:10, cursor:"pointer", textDecoration:"underline" }}>undo</button>
+                        <div className="animate-in" style={{ background:"rgba(74,97,128,0.08)", border:"1px dashed var(--border2)", borderRadius:4, padding:"12px 14px" }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                            <span style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.08em" }}>⚠ UNIT # SKIPPED</span>
+                            <button onClick={()=>setNoUnitNumber(false)} style={{ background:"none", border:"none", color:"var(--cyan)", fontFamily:"var(--mono)", fontSize:10, cursor:"pointer", textDecoration:"underline" }}>undo</button>
+                          </div>
+                          <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", opacity:0.6, letterSpacing:"0.06em" }}>FOR DEMO USE ONLY — unit # required in production</div>
                         </div>
                       )}
                     </div>
@@ -909,11 +977,13 @@ function App() {
               {/* STEP — Details */}
               {currentStepId==="details" && (
                 <div className="animate-in" style={{ display:"flex", flexDirection:"column", gap:16 }}>
+
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
                     <DataTag label="License Plate" value={detectedPlate||manualPlate} color="var(--cyan)" />
                     <DataTag label="Unit #" value={noUnitNumber?"N/A":detectedTruck||manualTruck||"—"} color="var(--amber)" />
                     <DataTag label="VIN" value={(detectedVin||manualVin)?.length>9?(detectedVin||manualVin).slice(0,9)+"…":(detectedVin||manualVin)} color="var(--green)" />
                   </div>
+
                   {vehicleInfo && (
                     <div style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:4, padding:"12px 14px" }}>
                       <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Decoded Vehicle</div>
@@ -921,6 +991,7 @@ function App() {
                       <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>{[vehicleInfo.trim,vehicleInfo.body,vehicleInfo.engine,vehicleInfo.fuel].filter(Boolean).join("  ·  ")}</div>
                     </div>
                   )}
+
                   <div>
                     <label className="field-label">Your Name <span style={{ color:"var(--red)" }}>*</span></label>
                     <input value={submittedBy} onChange={e=>setSubmittedBy(e.target.value)} placeholder="First and last name" className={`field-input ${submittedBy?"filled":""}`} />
@@ -953,6 +1024,7 @@ function App() {
                     <label className="field-label">Notes <span style={{ color:"var(--muted)", fontWeight:400 }}>(optional)</span></label>
                     <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Damage, odometer, special instructions..." rows={3} className="field-input" style={{ resize:"none" }} />
                   </div>
+
                   {existingRecord && (
                     <BracketCard accent="amber">
                       <div style={{ fontFamily:"var(--display)", fontSize:15, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)", marginBottom:8 }}>⚠ EXISTING RECORD FOUND</div>
@@ -961,6 +1033,7 @@ function App() {
                       <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", marginTop:8, letterSpacing:"0.06em" }}>→ SUBMIT WILL UPDATE THIS RECORD</div>
                     </BracketCard>
                   )}
+
                   <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", background:"rgba(0,232,122,0.04)", border:"1px solid rgba(0,232,122,0.12)", borderRadius:4 }}>
                     <span style={{ fontSize:14 }}>📊</span>
                     <div>
@@ -1006,4 +1079,4 @@ function App() {
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
-</html> 
+</html>
