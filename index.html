@@ -332,6 +332,7 @@ function App() {
   const [sheetStatus,   setSheetStatus]   = useState("no-sheet");
   const [sheetAction,   setSheetAction]   = useState("");
   const [sheetDebugMsg, setSheetDebugMsg] = useState("");
+  const [plateDebug,    setPlateDebug]    = useState("");
 
   useEffect(()=>{
     fetch(`${SHEET_URL}?action=getConfig`)
@@ -349,10 +350,10 @@ function App() {
   })();
 
   const handlePlateCapture = async data => {
-    setPlatePhoto(data); setPlateScanState("scanning"); setDetectedPlate(""); setManualPlate("");
+    setPlatePhoto(data); setPlateScanState("scanning"); setDetectedPlate(""); setManualPlate(""); setPlateDebug("");
     const r = await callAPI(data.file,"plate");
     if(r.found&&r.plate){setDetectedPlate(r.plate);setPlateScanState("done");}
-    else setPlateScanState("failed");
+    else { setPlateScanState("failed"); setPlateDebug(JSON.stringify(r)); }
   };
 
   const handleUnitCapture = async data => {
@@ -413,7 +414,7 @@ function App() {
     setUnitPhoto(null);setUnitScanState("idle");setDetectedUnit("");setManualUnit("");setUnitSkipped(false);
     setVinPhoto(null);setVinScanState("idle");setDetectedVin("");setManualVin("");setVehicleInfo(null);
     setSubmittedBy("");setDepartment("");setLocation("");setAssignedTo("");setNotes("");setExistingRecord(null);
-    setSubmitted(false);setSheetStatus("no-sheet");setSheetAction("");setSheetDebugMsg("");
+    setSubmitted(false);setSheetStatus("no-sheet");setSheetAction("");setSheetDebugMsg("");setPlateDebug("");
   };
 
   const plate = detectedPlate||manualPlate;
@@ -480,9 +481,15 @@ function App() {
                   <CameraCapture label="License Plate" hint="Fill the frame with the plate — every character must be legible" onCapture={handlePlateCapture} captured={platePhoto} accentColor="var(--cyan)"/>
                   <ScanResult state={plateScanState} label="License Plate" value={detectedPlate}/>
                   {plateScanState==="failed"&&(
-                    <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate}
-                      onSubmit={()=>{if(manualPlate.trim()){setDetectedPlate(manualPlate.trim());setPlateScanState("done");}}}
-                      btnLabel="CONFIRM PLATE →" maxLen={10} hint="WA = 7 chars  ·  OR = 5–7 chars"/>
+                    <div>
+                      <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate}
+                        onSubmit={()=>{if(manualPlate.trim()){setDetectedPlate(manualPlate.trim());setPlateScanState("done");}}}
+                        btnLabel="CONFIRM PLATE →" maxLen={10} hint="WA = 7 chars  ·  OR = 5–7 chars"/>
+                      {plateDebug&&<div style={{marginTop:8,background:"rgba(255,68,68,0.06)",border:"1px solid rgba(255,68,68,0.2)",borderRadius:3,padding:"8px 10px"}}>
+                        <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--red)",letterSpacing:"0.1em",marginBottom:3}}>DEBUG · GEMINI RESPONSE</div>
+                        <div style={{fontFamily:"var(--mono)",fontSize:10,color:"rgba(255,68,68,0.8)",wordBreak:"break-all",lineHeight:1.5}}>{plateDebug}</div>
+                      </div>}
+                    </div>
                   )}
                 </div>
               )}
