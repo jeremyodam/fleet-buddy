@@ -1,638 +1,91 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>FleetBuddy</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Barlow+Condensed:wght@400;600;700;800&display=swap" rel="stylesheet" />
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-<style>
-  :root {
-    --cyan:#00d4ff; --amber:#ffb800; --green:#00e87a; --red:#ff4444;
-    --bg:#07090d; --surface:#0c1018; --surface2:#111823;
-    --border:#1c2636; --border2:#243044; --text:#d8e4f0; --muted:#4a6180;
-    --mono:'IBM Plex Mono',monospace; --display:'Barlow Condensed',sans-serif; --body:'Rajdhani',sans-serif;
-  }
-  *{box-sizing:border-box;margin:0;padding:0;}
-  html,body{background:var(--bg);min-height:100vh;font-family:var(--body);color:var(--text);-webkit-font-smoothing:antialiased;}
-  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.02) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
-  #root{position:relative;z-index:1;}
-  select option{background:#111823;}
-  ::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
-  input,select,textarea{-webkit-appearance:none;appearance:none;}
-  input::placeholder,textarea::placeholder{color:var(--muted);}
-  @keyframes scanline{0%{transform:translateY(-100%);opacity:0;}10%{opacity:1;}90%{opacity:1;}100%{transform:translateY(500%);opacity:0;}}
-  @keyframes blink{0%,100%{opacity:1;}50%{opacity:0.3;}}
-  @keyframes slide-up{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
-  @keyframes decode{0%{letter-spacing:0.4em;opacity:0.3;}100%{letter-spacing:0.08em;opacity:1;}}
-  @keyframes spin{to{transform:rotate(360deg);}}
-  .animate-in{animation:slide-up 0.3s ease forwards;}
-  .decode-anim{animation:decode 0.5s ease forwards;}
-  .field-input{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:4px;padding:13px 16px;color:var(--text);font-size:15px;font-family:var(--body);font-weight:500;outline:none;transition:border-color 0.2s,box-shadow 0.2s;}
-  .field-input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(0,212,255,0.07);}
-  .field-input.filled{border-color:rgba(0,212,255,0.3);}
-  select.field-input{cursor:pointer;}
-  .field-label{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:7px;}
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script type="text/babel">
-const { useState, useRef, useEffect } = React;
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
-const SHEET_URL = "https://script.google.com/macros/s/AKfycbz0SZ0W-wBmwEe4vd0hwxuIp9Yh5XV88udlZF0wHMETROqlHb1OceN_JuoYpPm7g3o/exec";
-const API_URL   = "/api/platerecognizer";
+  const { mode, image } = req.body || {};
+  if (!image) return res.status(400).json({ error: "No image provided" });
+  if (!mode)  return res.status(400).json({ error: "No mode provided" });
 
-const DEFAULT_DEPARTMENTS = [
-  "Construction","Contract Management","Engineering","Facilities",
-  "Office Services","Operational Support Services",
-  "Operations Technical Services (OTS)","Purchasing & Stores","RMC","Safety",
-  "Spare / Awaiting Redeployment","System Operations (SysOps)","Training",
-  "Transportation","Utility Field Services (UFS)",
-];
-const DEFAULT_LOCATIONS = [
-  "Albany Resource Center","Central Resource Center","Coos Bay Resource Center",
-  "Eugene Resource Center","Lincoln City Resource Center","Mt Scott Resource Center",
-  "Parkrose Resource Center","Salem Resource Center","Sherwood OTC",
-  "Sunset Resource Center","The Dalles Resource Center","Warrenton Resource Center",
-  "Clark County Resource Center","Transportation","Spare / Pool Vehicle",
-  "250 Taylor (Corporate)","Portland LNG Plant","Newport LNG Plant",
-  "Miller Station","Off-Site / Unassigned","Dear Friends and Family",
-];
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) return res.status(500).json({ error: "GEMINI_API_KEY not configured" });
 
-const STEPS = [
-  { id:"plate",   label:"Plate + Unit #", short:"PLATE",   num:"01" },
-  { id:"vin",     label:"VIN",            short:"VIN",     num:"02" },
-  { id:"details", label:"Details",        short:"DETAILS", num:"03" },
-];
+  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
 
-// ── Image helper ─────────────────────────────────────────────────────────────
-const toBase64 = (file, maxPx=1600) => new Promise((res,rej) => {
-  const img = new Image();
-  const url = URL.createObjectURL(file);
-  img.onload = () => {
-    let w=img.width, h=img.height;
-    if(w>maxPx||h>maxPx){ if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}else{w=Math.round(w*maxPx/h);h=maxPx;} }
-    const c=document.createElement("canvas"); c.width=w; c.height=h;
-    c.getContext("2d").drawImage(img,0,0,w,h);
-    URL.revokeObjectURL(url);
-    res(c.toDataURL("image/jpeg",0.92).split(",")[1]);
-  };
-  img.onerror=()=>rej(new Error("Image load failed"));
-  img.src=url;
-});
-
-// ── API calls ─────────────────────────────────────────────────────────────────
-let lastScanError = "";
-
-async function callAPI(file, mode) {
-  const b64 = await toBase64(file);
-  const controller = new AbortController();
-  const tid = setTimeout(()=>controller.abort(), 25000);
-  try {
-    const resp = await fetch(API_URL, {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      signal:controller.signal,
-      body:JSON.stringify({ image:b64, mode, regions:["us-or","us-wa"] })
+  // ── Helper: call Gemini with an image + prompt ──────────────────────────────
+  async function askGemini(prompt, maxTokens = 20) {
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { inline_data: { mime_type: "image/jpeg", data: image } },
+          { text: prompt }
+        ]}],
+        generationConfig: { maxOutputTokens: maxTokens, temperature: 0 }
+      }),
     });
-    clearTimeout(tid);
-    const data = await resp.json();
-    if(data.error){ lastScanError = data.error; return null; }
-    return data;
-  } catch(e) {
-    clearTimeout(tid);
-    lastScanError = e.name==="AbortError" ? "TIMEOUT (25s)" : e.message;
-    return null;
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
   }
-}
 
-async function readPlateAndUnit(file) {
-  const [plateData, unitData] = await Promise.all([
-    callAPI(file, "plate"),
-    callAPI(file, "unit"),
-  ]);
-  return {
-    plate: plateData?.found ? plateData.plate : null,
-    unit:  unitData?.found  ? unitData.unit   : null,
-  };
-}
-
-async function readVin(file) {
-  const data = await callAPI(file, "vin");
-  return data?.found ? data.vin : null;
-}
-
-async function decodeVin(vin) {
-  const resp = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/${vin}?format=json`);
-  const data = await resp.json();
-  const r = data.Results?.[0]||{};
-  return {
-    year:r.ModelYear||"", make:r.Make||"", model:r.Model||"", trim:r.Trim||"",
-    body:r.BodyClass||"", engine:r.DisplacementL?`${parseFloat(r.DisplacementL).toFixed(1)}L`:"",
-    cylinders:r.EngineCylinders||"", drive:r.DriveType||"", fuel:r.FuelTypePrimary||"",
-  };
-}
-
-// ── UI Primitives ─────────────────────────────────────────────────────────────
-function BracketCard({children, accent="cyan", style={}}) {
-  const c={cyan:"#00d4ff",amber:"#ffb800",green:"#00e87a",red:"#ff4444"}[accent]||"#00d4ff";
-  return (
-    <div style={{position:"relative",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:4,padding:"18px 20px",...style}}>
-      <span style={{position:"absolute",top:-1,left:-1,width:14,height:14,borderTop:`2px solid ${c}`,borderLeft:`2px solid ${c}`,opacity:0.65}}/>
-      <span style={{position:"absolute",top:-1,right:-1,width:14,height:14,borderTop:`2px solid ${c}`,borderRight:`2px solid ${c}`,opacity:0.65}}/>
-      <span style={{position:"absolute",bottom:-1,left:-1,width:14,height:14,borderBottom:`2px solid ${c}`,borderLeft:`2px solid ${c}`,opacity:0.65}}/>
-      <span style={{position:"absolute",bottom:-1,right:-1,width:14,height:14,borderBottom:`2px solid ${c}`,borderRight:`2px solid ${c}`,opacity:0.65}}/>
-      {children}
-    </div>
-  );
-}
-
-function DataTag({label, value, color="var(--cyan)"}) {
-  return (
-    <div style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:4,padding:"10px 12px"}}>
-      <div style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:"0.1em",color:"var(--muted)",textTransform:"uppercase",marginBottom:4}}>{label}</div>
-      <div style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:600,color,letterSpacing:"0.06em",wordBreak:"break-all"}}>{value||"—"}</div>
-    </div>
-  );
-}
-
-function StatusPill({color, label}) {
-  return (
-    <span style={{display:"inline-flex",alignItems:"center",gap:6,background:`${color}14`,border:`1px solid ${color}40`,borderRadius:2,padding:"4px 12px"}}>
-      <span style={{width:5,height:5,borderRadius:"50%",background:color,boxShadow:`0 0 6px ${color}`}}/>
-      <span style={{fontFamily:"var(--mono)",fontSize:10,color,letterSpacing:"0.08em",textTransform:"uppercase"}}>{label}</span>
-    </span>
-  );
-}
-
-function Spinner({color="var(--amber)"}) {
-  return <div style={{width:16,height:16,border:`2px solid ${color}`,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.75s linear infinite",flexShrink:0}}/>;
-}
-
-// ── Camera Capture ────────────────────────────────────────────────────────────
-function CameraCapture({label, hint, onCapture, captured}) {
-  const ref = useRef();
-  const onChange = e => { const f=e.target.files[0]; if(f) onCapture({file:f,url:URL.createObjectURL(f)}); };
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      <p style={{fontFamily:"var(--body)",fontSize:13,color:"var(--muted)",lineHeight:1.6,margin:0}}>{hint}</p>
-      <input ref={ref} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={onChange}/>
-      {captured ? (
-        <div style={{position:"relative"}}>
-          <img src={captured.url} alt={label} style={{width:"100%",borderRadius:4,maxHeight:220,objectFit:"cover",border:"1px solid var(--border2)",display:"block"}}/>
-          <span style={{position:"absolute",top:8,left:8,width:18,height:18,borderTop:"2px solid var(--green)",borderLeft:"2px solid var(--green)"}}/>
-          <span style={{position:"absolute",top:8,right:8,width:18,height:18,borderTop:"2px solid var(--green)",borderRight:"2px solid var(--green)"}}/>
-          <span style={{position:"absolute",bottom:8,left:8,width:18,height:18,borderBottom:"2px solid var(--green)",borderLeft:"2px solid var(--green)"}}/>
-          <span style={{position:"absolute",bottom:8,right:8,width:18,height:18,borderBottom:"2px solid var(--green)",borderRight:"2px solid var(--green)"}}/>
-          <div style={{position:"absolute",top:10,left:10,background:"var(--green)",color:"#000",fontFamily:"var(--mono)",fontSize:9,fontWeight:700,padding:"3px 10px",borderRadius:2,letterSpacing:"0.1em"}}>CAPTURED ✓</div>
-          <button onClick={()=>ref.current.click()} style={{position:"absolute",bottom:10,right:10,background:"rgba(7,9,13,0.88)",color:"var(--muted)",border:"1px solid var(--border2)",borderRadius:2,padding:"5px 12px",fontFamily:"var(--mono)",fontSize:10,cursor:"pointer",letterSpacing:"0.08em"}}>RETAKE</button>
-        </div>
-      ) : (
-        <button onClick={()=>ref.current.click()} style={{background:"var(--surface2)",border:"1px dashed var(--border2)",borderRadius:4,padding:"42px 20px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:14,color:"#fff",width:"100%",position:"relative",overflow:"hidden",transition:"all 0.2s"}}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(0,212,255,0.4)";e.currentTarget.style.background="rgba(0,212,255,0.04)";}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border2)";e.currentTarget.style.background="var(--surface2)";}}>
-          <div style={{position:"absolute",left:0,right:0,height:2,background:"linear-gradient(90deg,transparent,var(--cyan),transparent)",animation:"scanline 2.8s ease-in-out infinite",opacity:0.35}}/>
-          <span style={{position:"absolute",top:10,left:10,width:16,height:16,borderTop:"1px solid var(--cyan)",borderLeft:"1px solid var(--cyan)",opacity:0.4}}/>
-          <span style={{position:"absolute",top:10,right:10,width:16,height:16,borderTop:"1px solid var(--cyan)",borderRight:"1px solid var(--cyan)",opacity:0.4}}/>
-          <span style={{position:"absolute",bottom:10,left:10,width:16,height:16,borderBottom:"1px solid var(--cyan)",borderLeft:"1px solid var(--cyan)",opacity:0.4}}/>
-          <span style={{position:"absolute",bottom:10,right:10,width:16,height:16,borderBottom:"1px solid var(--cyan)",borderRight:"1px solid var(--cyan)",opacity:0.4}}/>
-          <div style={{fontSize:34}}>📷</div>
-          <div style={{fontFamily:"var(--display)",fontSize:20,fontWeight:700,letterSpacing:"0.15em",color:"var(--text)"}}>TAP TO CAPTURE</div>
-          <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",letterSpacing:"0.08em",textTransform:"uppercase"}}>{label}</div>
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ── Result Row ────────────────────────────────────────────────────────────────
-function ResultRow({state, label, value, isVin}) {
-  if(state==="idle") return null;
-  if(state==="reading") return (
-    <div className="animate-in" style={{background:"rgba(255,184,0,0.05)",border:"1px solid rgba(255,184,0,0.18)",borderRadius:4,padding:"14px 16px",display:"flex",alignItems:"center",gap:14}}>
-      <Spinner/><div>
-        <div style={{fontFamily:"var(--display)",fontSize:16,fontWeight:700,letterSpacing:"0.1em",color:"var(--amber)"}}>READING {label.toUpperCase()}...</div>
-        <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",marginTop:3}}>AI analyzing image</div>
-      </div>
-    </div>
-  );
-  if(state==="decoding") return (
-    <div className="animate-in" style={{background:"rgba(0,212,255,0.05)",border:"1px solid rgba(0,212,255,0.18)",borderRadius:4,padding:"14px 16px",display:"flex",alignItems:"center",gap:14}}>
-      <Spinner color="var(--cyan)"/><div>
-        <div style={{fontFamily:"var(--display)",fontSize:16,fontWeight:700,letterSpacing:"0.1em",color:"var(--cyan)"}}>DECODING VIN</div>
-        <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",marginTop:3}}>Querying NHTSA database...</div>
-      </div>
-    </div>
-  );
-  if(state==="done"&&value) return (
-    <div className="animate-in" style={{background:"rgba(0,232,122,0.05)",border:"1px solid rgba(0,232,122,0.22)",borderRadius:4,padding:"14px 16px",display:"flex",alignItems:"center",gap:14}}>
-      <span style={{fontSize:20,flexShrink:0,color:"var(--green)"}}>✓</span>
-      <div style={{flex:1,minWidth:0}}>
-        <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>{label} DETECTED</div>
-        <div className="decode-anim" style={{fontFamily:"var(--mono)",fontSize:isVin?11:20,fontWeight:700,color:"var(--green)",letterSpacing:isVin?"0.1em":"0.2em",wordBreak:"break-all"}}>{value}</div>
-      </div>
-    </div>
-  );
-  return null;
-}
-
-// ── Vehicle Card ──────────────────────────────────────────────────────────────
-function VehicleCard({info, vin}) {
-  if(!info) return null;
-  const specs=[info.body,info.engine&&`${info.engine}${info.cylinders?" · "+info.cylinders+"cyl":""}`,info.drive,info.fuel].filter(Boolean);
-  return (
-    <BracketCard accent="green" style={{marginTop:12}}>
-      <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--green)",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:8}}>VEHICLE DECODED ✓</div>
-      <div style={{fontFamily:"var(--display)",fontSize:26,fontWeight:800,letterSpacing:"0.04em",color:"var(--text)",marginBottom:4}}>{info.year} {info.make} {info.model}</div>
-      {info.trim&&<div style={{fontFamily:"var(--body)",fontSize:14,color:"var(--muted)",marginBottom:10}}>{info.trim}</div>}
-      {specs.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>{specs.map(s=><span key={s} style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:2,padding:"3px 9px",fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)"}}>{s}</span>)}</div>}
-      {vin&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"rgba(0,232,122,0.35)",letterSpacing:"0.1em",borderTop:"1px solid var(--border)",paddingTop:10}}>{vin}</div>}
-    </BracketCard>
-  );
-}
-
-// ── Manual Entry ──────────────────────────────────────────────────────────────
-function ManualEntry({label, value, setValue, onSubmit, btnLabel, maxLen}) {
-  return (
-    <div className="animate-in" style={{background:"rgba(255,68,68,0.04)",border:"1px solid rgba(255,68,68,0.18)",borderRadius:4,padding:"16px",marginTop:12}}>
-      <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12}}>⚠ SCAN FAILED — ENTER MANUALLY</div>
-      <input value={value} onChange={e=>setValue(e.target.value.toUpperCase())} placeholder={`Enter ${label}`} maxLength={maxLen} className="field-input" style={{marginBottom:10,fontFamily:"var(--mono)",fontSize:14,letterSpacing:"0.1em"}}/>
-      <button onClick={onSubmit} disabled={!value.trim()} style={{width:"100%",border:"none",borderRadius:3,padding:"11px",background:value.trim()?"linear-gradient(90deg,#00d4ff,#0099cc)":"var(--surface2)",color:value.trim()?"#000":"var(--muted)",fontFamily:"var(--display)",fontSize:17,fontWeight:700,letterSpacing:"0.12em",cursor:value.trim()?"pointer":"not-allowed"}}>{btnLabel}</button>
-    </div>
-  );
-}
-
-// ── Confirmation ──────────────────────────────────────────────────────────────
-function ConfirmationCard({data, sheetStatus, sheetAction, sheetDebugMsg, onReset}) {
-  const vi = data.vehicleInfo;
-  return (
-    <div className="animate-in" style={{paddingBottom:40}}>
-      <BracketCard accent="green" style={{textAlign:"center",padding:"32px 24px",marginBottom:14}}>
-        <div style={{fontSize:50,marginBottom:12}}>✅</div>
-        <div style={{fontFamily:"var(--display)",fontSize:40,fontWeight:800,letterSpacing:"0.1em",color:"var(--green)",lineHeight:1}}>VEHICLE LOGGED</div>
-        <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",marginTop:8,marginBottom:18}}>{new Date().toLocaleString()}</div>
-        {sheetAction&&<div style={{marginBottom:10}}><StatusPill color={sheetAction==="NEW VEHICLE"?"var(--cyan)":"var(--amber)"} label={sheetAction==="NEW VEHICLE"?"NEW RECORD ADDED":"RECORD UPDATED"}/></div>}
-        <StatusPill
-          color={sheetStatus==="synced"?"var(--green)":sheetStatus==="pending"?"var(--amber)":sheetStatus==="error"?"var(--red)":"var(--muted)"}
-          label={sheetStatus==="synced"?"Synced to Google Sheets":sheetStatus==="pending"?"Syncing...":sheetStatus==="error"?"Sync Failed":"No Sheet"}
-        />
-        {sheetStatus==="error"&&sheetDebugMsg&&(
-          <div style={{marginTop:12,background:"rgba(255,68,68,0.06)",border:"1px solid rgba(255,68,68,0.25)",borderRadius:3,padding:"10px 12px",textAlign:"left"}}>
-            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--red)",letterSpacing:"0.1em",marginBottom:4}}>ERROR DETAIL</div>
-            <div style={{fontFamily:"var(--mono)",fontSize:10,color:"rgba(255,68,68,0.8)",wordBreak:"break-all",lineHeight:1.5}}>{sheetDebugMsg}</div>
-          </div>
-        )}
-      </BracketCard>
-
-      {vi&&(
-        <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:4,padding:"14px 16px",marginBottom:12}}>
-          <div style={{fontFamily:"var(--display)",fontSize:22,fontWeight:800,letterSpacing:"0.04em",marginBottom:4}}>{vi.year} {vi.make} {vi.model} {vi.trim}</div>
-          <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)"}}>{[vi.body,vi.engine,vi.drive,vi.fuel].filter(Boolean).join("  ·  ")}</div>
-          {data.vin&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"rgba(0,212,255,0.3)",marginTop:6}}>{data.vin}</div>}
-        </div>
-      )}
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-        {[{label:"License Plate",img:data.comboPhoto?.url},{label:"VIN Photo",img:data.vinPhoto?.url}].map(({label,img})=>img&&(
-          <div key={label}>
-            <img src={img} alt={label} style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:4,border:"1px solid var(--border)",display:"block"}}/>
-            <p style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--muted)",marginTop:5,textTransform:"uppercase",letterSpacing:"0.08em"}}>{label}</p>
-          </div>
-        ))}
-      </div>
-
-      <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:4,padding:"14px 16px",marginBottom:14}}>
-        {[["PLATE",data.plate],["UNIT #",data.unitNumber],["DEPARTMENT",data.department],["LOCATION",data.location],...(data.submittedBy?[["SUBMITTED BY",data.submittedBy]]:[]),...(data.assignedTo?[["ASSIGNED TO",data.assignedTo]]:[]),...(data.notes?[["NOTES",data.notes]]:[])].filter(([,v])=>v).map(([k,v])=>(
-          <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
-            <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.08em",flexShrink:0,marginRight:16}}>{k}</span>
-            <span style={{fontFamily:k==="PLATE"?"var(--mono)":"var(--body)",fontSize:k==="PLATE"?13:15,fontWeight:600,color:"var(--text)",textAlign:"right"}}>{v}</span>
-          </div>
-        ))}
-      </div>
-
-      <button onClick={onReset} style={{width:"100%",border:"none",borderRadius:3,padding:"16px",background:"linear-gradient(90deg,#00d4ff,#0099cc)",color:"#000",fontFamily:"var(--display)",fontSize:20,fontWeight:800,letterSpacing:"0.15em",cursor:"pointer",boxShadow:"0 4px 24px rgba(0,212,255,0.25)"}}>LOG ANOTHER VEHICLE</button>
-    </div>
-  );
-}
-
-// ── App ───────────────────────────────────────────────────────────────────────
-function App() {
-  const [departments,    setDepartments]    = useState(DEFAULT_DEPARTMENTS);
-  const [locations,      setLocations]      = useState(DEFAULT_LOCATIONS);
-  const [step,           setStep]           = useState(0);
-  const currentStepId = STEPS[step]?.id;
-
-  const [comboPhoto,     setComboPhoto]     = useState(null);
-  const [comboState,     setComboState]     = useState("idle");
-  const [plateScanState, setPlateScanState] = useState("idle");
-  const [detectedPlate,  setDetectedPlate]  = useState("");
-  const [manualPlate,    setManualPlate]    = useState("");
-  const [truckScanState, setTruckScanState] = useState("idle");
-  const [detectedTruck,  setDetectedTruck]  = useState("");
-  const [manualTruck,    setManualTruck]    = useState("");
-  const [noUnitNumber,   setNoUnitNumber]   = useState(false);
-
-  const [vinPhoto,       setVinPhoto]       = useState(null);
-  const [vinScanState,   setVinScanState]   = useState("idle");
-  const [detectedVin,    setDetectedVin]    = useState("");
-  const [manualVin,      setManualVin]      = useState("");
-  const [vehicleInfo,    setVehicleInfo]    = useState(null);
-
-  const [submittedBy,    setSubmittedBy]    = useState("");
-  const [department,     setDepartment]     = useState("");
-  const [location,       setLocation]       = useState("");
-  const [assignedTo,     setAssignedTo]     = useState("");
-  const [notes,          setNotes]          = useState("");
-  const [existingRecord, setExistingRecord] = useState(null);
-
-  const [submitted,      setSubmitted]      = useState(false);
-  const [sheetStatus,    setSheetStatus]    = useState("no-sheet");
-  const [sheetAction,    setSheetAction]    = useState("");
-  const [sheetDebugMsg,  setSheetDebugMsg]  = useState("");
-
-  const isFamilyPilot = department === "Dear Friends and Family";
-
-  useEffect(()=>{
-    fetch(`${SHEET_URL}?action=getConfig`)
-      .then(r=>r.json())
-      .then(j=>{ if(j.departments?.length) setDepartments(j.departments); if(j.locations?.length) setLocations(j.locations); })
-      .catch(()=>{});
-  },[]);
-
-  const canAdvance = (() => {
-    if(currentStepId==="plate") {
-      const plateOk = plateScanState==="done" || (plateScanState==="no_read" && manualPlate.trim().length>=2);
-      const unitOk  = truckScanState==="done" || (truckScanState==="no_read" && manualTruck.trim().length>=1) || noUnitNumber;
-      return plateOk && unitOk;
-    }
-    if(currentStepId==="vin")     return vinScanState==="done" || (vinScanState==="no_read" && manualVin.trim().length===17);
-    if(currentStepId==="details") return !!(submittedBy && department && location);
-    return false;
-  })();
-
-  const handleComboCapture = async data => {
-    setComboPhoto(data); setComboState("reading");
-    setDetectedPlate(""); setManualPlate("");
-    setDetectedTruck(""); setManualTruck(""); setNoUnitNumber(false);
-    setPlateScanState("idle"); setTruckScanState("idle");
+  // ── MODE: plate ─────────────────────────────────────────────────────────────
+  // WA plates: 7 characters (e.g. D84018 or ABC1234)
+  // OR plates: 5–7 characters (e.g. 123ABC or ABC123)
+  if (mode === "plate") {
     try {
-      const result = await readPlateAndUnit(data.file);
-      if(result.plate){ setDetectedPlate(result.plate); setPlateScanState("done"); }
-      else             { setPlateScanState("no_read"); }
-      if(result.unit) { setDetectedTruck(result.unit);  setTruckScanState("done"); }
-      else             { setTruckScanState("no_read"); }
-    } catch { setPlateScanState("no_read"); setTruckScanState("no_read"); }
-    setComboState("done");
-  };
-
-  const handleVinCapture = async data => {
-    setVinPhoto(data); setVinScanState("reading");
-    setDetectedVin(""); setVehicleInfo(null); setManualVin(""); setExistingRecord(null);
-    try {
-      const vin = await readVin(data.file);
-      if(!vin){ setVinScanState("no_read"); return; }
-      setDetectedVin(vin); setVinScanState("decoding");
-      const info = await decodeVin(vin);
-      setVehicleInfo(info); setVinScanState("done");
-      fetch(`${SHEET_URL}?action=checkVehicle&vin=${encodeURIComponent(vin)}&plate=${encodeURIComponent(detectedPlate||manualPlate||"")}`)
-        .then(r=>r.json()).then(j=>{ if(j.found) setExistingRecord(j); }).catch(()=>{});
-    } catch { setVinScanState("no_read"); }
-  };
-
-  const handleManualVin = async () => {
-    const vin = manualVin.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,"");
-    if(vin.length!==17) return;
-    setVinScanState("decoding"); setDetectedVin(vin); setExistingRecord(null);
-    try {
-      const info = await decodeVin(vin);
-      setVehicleInfo(info); setVinScanState("done");
-    } catch { setVinScanState("no_read"); }
-  };
-
-  const reset = () => {
-    setStep(0);
-    setComboPhoto(null); setComboState("idle");
-    setPlateScanState("idle"); setDetectedPlate(""); setManualPlate("");
-    setTruckScanState("idle"); setDetectedTruck(""); setManualTruck(""); setNoUnitNumber(false);
-    setVinPhoto(null); setVinScanState("idle"); setDetectedVin(""); setVehicleInfo(null); setManualVin("");
-    setSubmittedBy(""); setDepartment(""); setLocation(""); setAssignedTo(""); setNotes(""); setExistingRecord(null);
-    setSubmitted(false); setSheetStatus("no-sheet"); setSheetAction(""); setSheetDebugMsg("");
-  };
-
-  const handleSubmit = async () => {
-    setSubmitted(true); setSheetStatus("pending"); setSheetDebugMsg("");
-    const payload = {
-      entryId:"FB-"+Date.now(), timestamp:new Date().toLocaleString(),
-      vin:detectedVin||manualVin||"",
-      licensePlate:detectedPlate||manualPlate||"",
-      unitNumber:noUnitNumber?"NONE":detectedTruck||manualTruck||"",
-      year:vehicleInfo?.year||"", make:vehicleInfo?.make||"", model:vehicleInfo?.model||"",
-      trim:vehicleInfo?.trim||"", body:vehicleInfo?.body||"", engine:vehicleInfo?.engine||"",
-      cylinders:vehicleInfo?.cylinders||"", drive:vehicleInfo?.drive||"", fuel:vehicleInfo?.fuel||"",
-      submittedBy, department, location, assignedTo, notes,
-      unitNumberSkipped:noUnitNumber, source:"FleetBuddy v3.0",
-    };
-    try {
-      const res = await fetch(SHEET_URL, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(payload)
-      });
-      const rawText = await res.text();
-      let json;
-      try { json = JSON.parse(rawText); }
-      catch {
-        setSheetStatus("error");
-        setSheetDebugMsg(`HTTP ${res.status} — Not JSON: ${rawText.substring(0,200)}`);
-        return;
+      const raw = await askGemini(
+        `Read the license plate in this photo. Return ONLY the plate characters exactly as they appear — no spaces, no state name, no punctuation, no extra words. Washington plates are typically 7 characters. Oregon plates are typically 5-7 characters. If you cannot read the plate, return NOTFOUND.`,
+        20
+      );
+      const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!clean || clean === "NOTFOUND" || clean.length < 4) {
+        return res.json({ found: false, plate: null, raw });
       }
-      if(json.success){ setSheetStatus("synced"); if(json.action) setSheetAction(json.action); }
-      else { setSheetStatus("error"); setSheetDebugMsg(json.error||json.message||JSON.stringify(json).substring(0,200)); }
-    } catch(e) {
-      setSheetStatus("error");
-      setSheetDebugMsg("FETCH ERR: "+e.message);
+      return res.json({ found: true, plate: clean });
+    } catch (e) {
+      return res.json({ found: false, plate: null, error: e.message });
     }
-  };
+  }
 
-  return (
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center"}}>
+  // ── MODE: unit ──────────────────────────────────────────────────────────────
+  // NW Natural fleet unit numbers: 4 digits painted/stickered on door or hood
+  if (mode === "unit") {
+    try {
+      const raw = await askGemini(
+        `This is a photo of a utility fleet vehicle. Find the unit number — it is a 4-digit number painted or stickered on the door, hood, or cab of the truck. It is NOT the license plate and NOT the VIN. Return ONLY the 4 digits. If you cannot find a 4-digit unit number, return NOTFOUND.`,
+        10
+      );
+      const clean = raw.replace(/[^0-9]/g, "");
+      if (!clean || clean.length < 3 || clean.length > 6) {
+        return res.json({ found: false, unit: null, raw });
+      }
+      return res.json({ found: true, unit: clean });
+    } catch (e) {
+      return res.json({ found: false, unit: null, error: e.message });
+    }
+  }
 
-      <div style={{width:"100%",background:"rgba(7,9,13,0.94)",backdropFilter:"blur(20px)",borderBottom:"1px solid var(--border)",padding:"0 20px",position:"sticky",top:0,zIndex:100,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{display:"flex",alignItems:"center",gap:14,padding:"11px 0"}}>
-          <div style={{background:"rgba(0,212,255,0.08)",border:"1px solid rgba(0,212,255,0.25)",borderRadius:4,padding:"8px 11px",fontSize:20}}>🚗</div>
-          <div>
-            <div style={{fontFamily:"var(--display)",fontSize:28,fontWeight:800,letterSpacing:"0.1em",lineHeight:1,color:"var(--cyan)"}}>FleetBuddy</div>
-            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--muted)",letterSpacing:"0.1em",textTransform:"uppercase",marginTop:2}}>BuddySuite · Vehicle Tracking</div>
-          </div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{width:7,height:7,borderRadius:"50%",background:"var(--green)",boxShadow:"0 0 8px var(--green)",animation:"blink 2.5s ease-in-out infinite"}}/>
-          <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",letterSpacing:"0.08em"}}>LIVE</span>
-        </div>
-      </div>
+  // ── MODE: vin ───────────────────────────────────────────────────────────────
+  // VINs: exactly 17 characters, no I, O, or Q
+  if (mode === "vin") {
+    try {
+      const raw = await askGemini(
+        `Find the Vehicle Identification Number (VIN) in this photo. The VIN is exactly 17 characters using only letters A-H, J-N, P-Z and digits 0-9 (never I, O, or Q). It is usually on a sticker on the driver-side door jamb or on a plate visible through the windshield. Return ONLY the 17 characters, no spaces or dashes. If you cannot find it, return NOTFOUND.`,
+        30
+      );
+      const clean = raw.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+      if (clean.length !== 17) {
+        return res.json({ found: false, vin: null, raw, cleanLength: clean.length });
+      }
+      return res.json({ found: true, vin: clean });
+    } catch (e) {
+      return res.json({ found: false, vin: null, error: e.message });
+    }
+  }
 
-      <div style={{width:"100%",maxWidth:480,padding:"20px 16px 48px"}}>
-        {submitted ? (
-          <ConfirmationCard
-            data={{comboPhoto,vinPhoto,plate:detectedPlate||manualPlate,unitNumber:noUnitNumber?"N/A":detectedTruck||manualTruck,vin:detectedVin||manualVin,vehicleInfo,submittedBy,department,location,assignedTo,notes}}
-            sheetStatus={sheetStatus} sheetAction={sheetAction} sheetDebugMsg={sheetDebugMsg} onReset={reset}
-          />
-        ) : (
-          <>
-            <div style={{display:"flex",alignItems:"center",marginBottom:24}}>
-              {STEPS.map((s,i)=>{
-                const done=i<step, cur=i===step;
-                return (
-                  <React.Fragment key={s.id}>
-                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
-                      <div style={{width:38,height:38,borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--mono)",fontSize:done?16:11,fontWeight:700,transition:"all 0.3s",background:cur?"var(--cyan)":done?"rgba(0,212,255,0.12)":"var(--surface2)",border:cur?"none":done?"1px solid rgba(0,212,255,0.35)":"1px solid var(--border)",color:cur?"#000":done?"var(--cyan)":"var(--muted)",boxShadow:cur?"0 0 20px rgba(0,212,255,0.3)":"none"}}>{done?"✓":s.num}</div>
-                      <div style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:"0.07em",textTransform:"uppercase",whiteSpace:"nowrap",color:cur?"var(--cyan)":done?"rgba(0,212,255,0.45)":"var(--muted)",fontWeight:cur?600:400}}>{s.short}</div>
-                    </div>
-                    {i<STEPS.length-1&&<div style={{flex:1,height:1,margin:"0 6px",marginBottom:20,background:done?"rgba(0,212,255,0.35)":"var(--border)",transition:"background 0.3s"}}/>}
-                  </React.Fragment>
-                );
-              })}
-            </div>
-
-            <BracketCard style={{marginBottom:14}}>
-              <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:18}}>
-                <div style={{fontFamily:"var(--display)",fontSize:32,fontWeight:800,letterSpacing:"0.08em",color:"var(--text)",lineHeight:1}}>{STEPS[step]?.label.toUpperCase()}</div>
-                <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",letterSpacing:"0.1em"}}>STEP {step+1}/{STEPS.length}</div>
-              </div>
-
-              {currentStepId==="plate" && (
-                <div className="animate-in">
-                  <div style={{background:"rgba(255,184,0,0.04)",border:"1px solid rgba(255,184,0,0.15)",borderRadius:3,padding:"10px 14px",marginBottom:16,display:"flex",gap:10}}>
-                    <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--amber)",letterSpacing:"0.08em",flexShrink:0,marginTop:1}}>AI</span>
-                    <p style={{fontFamily:"var(--body)",fontSize:13,color:"var(--muted)",lineHeight:1.6,margin:0}}>One photo — AI reads plate and unit number simultaneously. Works in low light and rain.</p>
-                  </div>
-                  <CameraCapture label="Plate + Unit Number" hint="Get the side of the truck — plate AND painted unit number in frame" onCapture={handleComboCapture} captured={comboPhoto}/>
-                  {comboState==="reading" && (
-                    <div className="animate-in" style={{background:"rgba(255,184,0,0.05)",border:"1px solid rgba(255,184,0,0.18)",borderRadius:4,padding:"14px 16px",marginTop:12,display:"flex",alignItems:"center",gap:14}}>
-                      <Spinner/><div>
-                        <div style={{fontFamily:"var(--display)",fontSize:16,fontWeight:700,letterSpacing:"0.1em",color:"var(--amber)"}}>SCANNING...</div>
-                        <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",marginTop:3}}>Reading plate + unit number simultaneously</div>
-                      </div>
-                    </div>
-                  )}
-                  {comboState==="done" && (
-                    <div className="animate-in" style={{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
-                      <ResultRow state={plateScanState} label="License Plate" value={detectedPlate}/>
-                      {plateScanState==="no_read" && <ManualEntry label="license plate" value={manualPlate} setValue={setManualPlate} onSubmit={()=>{ if(manualPlate.trim()){ setDetectedPlate(manualPlate.trim()); setPlateScanState("done"); }}} btnLabel="CONFIRM PLATE →" maxLen={10}/>}
-                      {!noUnitNumber && <ResultRow state={truckScanState} label="Unit Number" value={detectedTruck}/>}
-                      {truckScanState==="no_read" && !noUnitNumber && (
-                        <div className="animate-in" style={{background:"rgba(255,184,0,0.05)",border:"1px solid rgba(255,184,0,0.25)",borderRadius:4,padding:"14px 16px"}}>
-                          <div style={{fontFamily:"var(--display)",fontSize:15,fontWeight:700,letterSpacing:"0.1em",color:"var(--amber)",marginBottom:10}}>⚠ NO UNIT # DETECTED</div>
-                          <ManualEntry label="unit number" value={manualTruck} setValue={setManualTruck} onSubmit={()=>{ if(manualTruck.trim()){ setDetectedTruck(manualTruck.trim()); setTruckScanState("done"); }}} btnLabel="CONFIRM UNIT # →" maxLen={10}/>
-                          <button onClick={()=>{ setNoUnitNumber(true); setDetectedTruck(""); setManualTruck(""); }} style={{marginTop:10,width:"100%",background:"transparent",border:"1px solid var(--border2)",borderRadius:3,padding:"11px",color:"var(--muted)",fontFamily:"var(--mono)",fontSize:10,cursor:"pointer",letterSpacing:"0.08em"}}>NO UNIT # ON THIS VEHICLE — SKIP</button>
-                        </div>
-                      )}
-                      {noUnitNumber && (
-                        <div className="animate-in" style={{background:"rgba(74,97,128,0.1)",border:"1px solid var(--border2)",borderRadius:4,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",letterSpacing:"0.08em"}}>NO UNIT # — SKIPPED</span>
-                          <button onClick={()=>setNoUnitNumber(false)} style={{background:"none",border:"none",color:"var(--muted)",fontFamily:"var(--mono)",fontSize:10,cursor:"pointer",textDecoration:"underline"}}>undo</button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {currentStepId==="vin" && (
-                <div className="animate-in">
-                  <div style={{background:"rgba(0,212,255,0.04)",border:"1px solid rgba(0,212,255,0.1)",borderRadius:3,padding:"10px 14px",marginBottom:16,display:"flex",gap:10}}>
-                    <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--cyan)",letterSpacing:"0.08em",flexShrink:0,marginTop:1}}>AI</span>
-                    <p style={{fontFamily:"var(--body)",fontSize:13,color:"var(--muted)",lineHeight:1.6,margin:0}}>AI reads the VIN. NHTSA decodes year, make, model, trim, engine &amp; drivetrain.</p>
-                  </div>
-                  <CameraCapture label="VIN" hint="Driver-side door jamb sticker or dashboard VIN plate — get close, keep steady" onCapture={handleVinCapture} captured={vinPhoto}/>
-                  <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
-                    <ResultRow state={vinScanState} label="VIN" value={detectedVin} isVin/>
-                    {vinScanState==="done" && <VehicleCard info={vehicleInfo} vin={detectedVin}/>}
-                    {vinScanState==="no_read" && <ManualEntry label="VIN (17 characters)" value={manualVin} setValue={setManualVin} onSubmit={handleManualVin} btnLabel="DECODE VIN →" maxLen={17}/>}
-                  </div>
-                </div>
-              )}
-
-              {currentStepId==="details" && (
-                <div className="animate-in" style={{display:"flex",flexDirection:"column",gap:16}}>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                    <DataTag label="Plate"  value={detectedPlate||manualPlate} color="var(--cyan)"/>
-                    <DataTag label="Unit #" value={noUnitNumber?"N/A":detectedTruck||manualTruck||"—"} color="var(--amber)"/>
-                    <DataTag label="VIN"    value={(detectedVin||manualVin)?.length>9?(detectedVin||manualVin).slice(0,9)+"…":(detectedVin||manualVin)} color="var(--green)"/>
-                  </div>
-                  {vehicleInfo && (
-                    <div style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:4,padding:"12px 14px"}}>
-                      <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>Decoded Vehicle</div>
-                      <div style={{fontFamily:"var(--display)",fontSize:20,fontWeight:700,letterSpacing:"0.04em"}}>{vehicleInfo.year} {vehicleInfo.make} {vehicleInfo.model}</div>
-                      <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)",marginTop:3}}>{[vehicleInfo.trim,vehicleInfo.body,vehicleInfo.engine,vehicleInfo.fuel].filter(Boolean).join("  ·  ")}</div>
-                    </div>
-                  )}
-                  <div>
-                    <label className="field-label">Your Name <span style={{color:"var(--red)"}}>*</span></label>
-                    <input value={submittedBy} onChange={e=>setSubmittedBy(e.target.value)} placeholder="First and last name" className={`field-input ${submittedBy?"filled":""}`}/>
-                  </div>
-                  <div>
-                    <label className="field-label">Department <span style={{color:"var(--red)"}}>*</span></label>
-                    <select value={department} onChange={e=>setDepartment(e.target.value)} className={`field-input ${department?"filled":""}`} style={{color:department?"var(--text)":"var(--muted)"}}>
-                      <option value="">Select department...</option>
-                      {departments.map(d=><option key={d} value={d}>{d}</option>)}
-                    </select>
-                    {isFamilyPilot&&<div style={{marginTop:8,background:"rgba(0,232,122,0.05)",border:"1px solid rgba(0,232,122,0.2)",borderRadius:3,padding:"8px 12px",display:"flex",gap:8,alignItems:"center"}}><span style={{fontSize:16}}>💚</span><span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--green)",letterSpacing:"0.06em"}}>PILOT MODE · Thanks for testing FleetBuddy!</span></div>}
-                  </div>
-                  <div>
-                    <label className="field-label">Resource Center / Location <span style={{color:"var(--red)"}}>*</span></label>
-                    <select value={location} onChange={e=>setLocation(e.target.value)} className={`field-input ${location?"filled":""}`} style={{color:location?"var(--text)":"var(--muted)"}}>
-                      <option value="">Select location...</option>
-                      {locations.map(l=><option key={l} value={l}>{l}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label">Assigned To <span style={{color:"var(--muted)",fontWeight:400}}>(optional)</span></label>
-                    <input value={assignedTo} onChange={e=>setAssignedTo(e.target.value)} placeholder="Driver or employee name" className="field-input"/>
-                  </div>
-                  <div>
-                    <label className="field-label">Notes <span style={{color:"var(--muted)",fontWeight:400}}>(optional)</span></label>
-                    <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Damage, odometer, special instructions..." rows={3} className="field-input" style={{resize:"none"}}/>
-                  </div>
-                  {existingRecord && (
-                    <BracketCard accent="amber">
-                      <div style={{fontFamily:"var(--display)",fontSize:15,fontWeight:700,letterSpacing:"0.1em",color:"var(--amber)",marginBottom:8}}>⚠ EXISTING RECORD FOUND</div>
-                      <div style={{fontFamily:"var(--body)",fontSize:15,fontWeight:600,marginBottom:4}}>{[existingRecord.year,existingRecord.make,existingRecord.model].filter(Boolean).join(" ")||"Vehicle on file"}</div>
-                      {existingRecord.lastUpdated&&<div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--muted)"}}>Last updated: {existingRecord.lastUpdated}{existingRecord.submittedBy?" · "+existingRecord.submittedBy:""}</div>}
-                      <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--amber)",marginTop:8,letterSpacing:"0.06em"}}>→ SUBMIT WILL UPDATE THIS RECORD</div>
-                    </BracketCard>
-                  )}
-                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"rgba(0,232,122,0.04)",border:"1px solid rgba(0,232,122,0.12)",borderRadius:4}}>
-                    <span style={{fontSize:14}}>📊</span>
-                    <div>
-                      <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--green)",letterSpacing:"0.08em"}}>READY TO SYNC</div>
-                      <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--muted)",marginTop:2}}>Plate · Unit # · VIN · Vehicle · Dept · Location</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </BracketCard>
-
-            <div style={{display:"flex",gap:10}}>
-              {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{flex:1,background:"var(--surface)",border:"1px solid var(--border2)",color:"var(--muted)",borderRadius:3,padding:"15px",fontFamily:"var(--display)",fontSize:17,fontWeight:700,letterSpacing:"0.1em",cursor:"pointer"}}>← BACK</button>}
-              <button
-                onClick={()=>{ if(step<STEPS.length-1) setStep(s=>s+1); else handleSubmit(); }}
-                disabled={!canAdvance}
-                style={{flex:2,border:"none",borderRadius:3,padding:"15px",fontFamily:"var(--display)",fontSize:19,fontWeight:800,letterSpacing:"0.15em",cursor:canAdvance?"pointer":"not-allowed",transition:"all 0.2s",background:canAdvance?"linear-gradient(90deg,#00d4ff,#0099cc)":"var(--surface2)",color:canAdvance?"#000":"var(--muted)",boxShadow:canAdvance?"0 4px 24px rgba(0,212,255,0.25)":"none"}}
-              >
-                {step<STEPS.length-1?"NEXT →":existingRecord?"UPDATE VEHICLE ✓":"SUBMIT VEHICLE ✓"}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
+  return res.status(400).json({ error: `Unknown mode: ${mode}` });
 }
-
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-</script>
-</body>
-</html>
