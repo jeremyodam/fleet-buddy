@@ -98,25 +98,69 @@ async function geminiVision(file, prompt) {
   } catch { return ""; }
 }
 
-// Plate: dedicated single-job prompt with retry
-async function scanPlate(file) {
-  const p1 =
-    "Your ONLY job: read the LICENSE PLATE on this vehicle.\n" +
-    "Oregon plates = 3 letters + 3 digits. Washington plates = 3 letters + 4 digits.\n" +
-    "Read every character left-to-right. Do NOT stop early or skip any character.\n" +
-    "Look-alikes: 0/O, 1/I, 8/B, 5/S — choose whichever fits the plate pattern.\n" +
-    "Return ONLY the plate characters. No spaces, no state, no punctuation.\n" +
-    "If no plate visible: NOTFOUND";
-  let raw = await geminiVision(file, p1);
-  let clean = raw.toUpperCase().replace(/[^A-Z0-9]/g,"");
-  if (clean && clean !== "NOTFOUND" && clean.length >= 4) return clean;
+// Crop a file to a region (0.0–1.0 fractions) and return a new File-like Blob
+function cropImage(file, x, y, w, h) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const sw = Math.round(img.width * w),  sh = Math.round(img.height * h);
+      const sx = Math.round(img.width * x),  sy = Math.round(img.height * y);
+      const c = document.createElement("canvas"); c.width = sw; c.height = sh;
+      c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      URL.revokeObjectURL(url);
+      c.toBlob(b => { if(b){ const f=new File([b],"crop.jpg",{type:"image/jpeg"}); res(f); } else rej(); }, "image/jpeg", 0.95);
+    };
+    img.onerror = rej;
+    img.src = url;
+  });
+}
 
-  const p2 =
-    "Look at the metal license plate tag on this vehicle. Read ALL characters left to right — do not cut short.\n" +
-    "Return ONLY the alphanumeric plate characters. Nothing else. Or NOTFOUND.";
-  raw = await geminiVision(file, p2);
-  clean = raw.toUpperCase().replace(/[^A-Z0-9]/g,"");
-  return (clean && clean !== "NOTFOUND" && clean.length >= 4) ? clean : null;
+// Plate: 4-attempt strategy — full image x2, then cropped bottom-third x2
+async function scanPlate(file) {
+  const PLATE_PROMPT =
+    "READ THE LICENSE PLATE. This is your only task.\n" +
+    "The plate is a rectangular tag with alphanumeric characters mounted on the vehicle.\n" +
+    "CRITICAL: Read EVERY character from LEFT to RIGHT. Do not stop after 3 or 4 characters — read the FULL plate.\n" +
+    "Oregon plates have 6 characters: 3 letters then 3 digits (e.g. ABC123).\n" +
+    "Washington plates have 7 characters: 3 letters then 4 digits (e.g. ABC1234).\n" +
+    "You MUST return all 6 or 7 characters. A 2, 3, or 4 character answer is WRONG and incomplete.\n" +
+    "Common look-alikes: O↔0, I↔1, B↔8, S↔5, Z↔2.\n" +
+    "Return ONLY the characters — no spaces, no state name, no punctuation. Or NOTFOUND.";
+
+  const PLATE_PROMPT2 =
+    "Find the license plate on this vehicle and read ALL of its characters.\n" +
+    "Count: Oregon = 6 chars, Washington = 7 chars. You need all of them.\n" +
+    "Say each character aloud in your mind before typing: first char, second char, third... all the way to the last.\n" +
+    "Return ONLY those characters with nothing else. Or NOTFOUND.";
+
+  const tryRead = async (f, prompt) => {
+    const raw = await geminiVision(f, prompt);
+    const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (clean && clean !== "NOTFOUND" && clean.length >= 5) return clean;
+    return null;
+  };
+
+  // Attempt 1 — full image, strong prompt
+  let result = await tryRead(file, PLATE_PROMPT);
+  if (result) return result;
+
+  // Attempt 2 — full image, different framing
+  result = await tryRead(file, PLATE_PROMPT2);
+  if (result) return result;
+
+  // Attempt 3 — crop bottom 40% of image (plate usually there) + strong prompt
+  try {
+    const cropped = await cropImage(file, 0, 0.55, 1, 0.45);
+    result = await tryRead(cropped, PLATE_PROMPT);
+    if (result) return result;
+
+    // Attempt 4 — crop + second prompt
+    result = await tryRead(cropped, PLATE_PROMPT2);
+    if (result) return result;
+  } catch {}
+
+  return null;
 }
 
 // VIN: dedicated single-job prompt with 3 attempts
@@ -568,7 +612,7 @@ function App() {
                     </p>
                   </div>
                   <CameraCapture label="License Plate" hint="Fill the frame with the plate — sharp, well-lit, every character visible" onCapture={handlePlateCapture} captured={platePhoto}/>
-                  {plateScan === "scanning" && <Spinner color="var(--amber)" label="READING PLATE..." sub="AI scanning license plate..."/>}
+                  {plateScan === "scanning" && <Spinner color="var(--amber)" label="READING PLATE..." sub="AI scanning — up to 4 attempts for full plate..."/>}
                   {plateScan === "done" && <ScanResult label="License Plate" value={detectedPlate}/>}
                   {plateScan === "fail" && (
                     <ScanFail label="license plate" value={manualPlate} setValue={setManualPlate}
