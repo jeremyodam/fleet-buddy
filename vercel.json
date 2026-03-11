@@ -1,9 +1,8 @@
 {
   "functions": {
-    "api/gemini.js": {
+    "api/platerecognizer.js": {
       "memory": 256,
       "maxDuration": 15
     }
   }
 }
-
