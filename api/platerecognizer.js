@@ -43,9 +43,9 @@ export default async function handler(req, res) {
       );
       const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
       if (!clean || clean === "NOTFOUND" || clean.length < 4) {
-        return res.json({ found: false, plate: null, raw });
+        return res.json({ found: false, plate: null, raw, clean, reason: "too short or NOTFOUND" });
       }
-      return res.json({ found: true, plate: clean });
+      return res.json({ found: true, plate: clean, raw });
     } catch (e) {
       return res.json({ found: false, plate: null, error: e.message });
     }
