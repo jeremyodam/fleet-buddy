@@ -170,7 +170,7 @@ async function geminiVision(file, prompt) {
           { inline_data:{ mime_type: file.type||"image/jpeg", data:b64 } },
           { text: prompt }
         ]}],
-        generationConfig:{ maxOutputTokens:60, temperature:0 }
+        generationConfig:{ maxOutputTokens:200, temperature:0 }
       })
     });
     clearTimeout(timeoutId);
