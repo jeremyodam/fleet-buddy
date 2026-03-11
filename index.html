@@ -190,54 +190,80 @@ async function geminiVision(file, prompt) {
 
 async function readVinFromImage(file) {
   const VIN_PROMPT =
-    "TASK: Extract the 17-character VIN from this vehicle photo.\n\n" +
-    "VIN RULES:\n" +
-    "- Exactly 17 characters. Valid chars: A-H, J-N, P-Z, 0-9. NEVER contains I, O, or Q.\n" +
-    "- Common confusion: letter B vs digit 8, letter S vs digit 5, letter Z vs digit 2, letter D vs digit 0.\n" +
-    "- If you see I substitute 1 or J. If you see O substitute 0. If you see Q substitute 0 or G.\n" +
-    "- VIN position: driver-side door jamb sticker (most common), or dashboard plate visible through windshield.\n" +
-    "- Ignore barcodes, part numbers, license plates, unit numbers — they are NOT the VIN.\n\n" +
-    "INSTRUCTIONS:\n" +
-    "1. Scan the entire image carefully.\n" +
-    "2. Find the sequence of exactly 17 alphanumeric characters.\n" +
-    "3. Read each character individually left to right — do not skip or compress.\n" +
-    "4. If a character is blurry, use context: VINs follow patterns (positions 1-3 = manufacturer, 10 = model year).\n" +
-    "5. Output ONLY the 17-character VIN. No spaces, no dashes, no labels, no explanation.\n" +
-    "6. If you truly cannot find a VIN, output: NOTFOUND\n\n" +
-    "CRITICAL: Count your output. It must be exactly 17 characters.";
+    "TASK: Read the 17-character VIN from this vehicle photo. This is a utility fleet vehicle in the field — the image may be dim, angled, or taken in rain.\n\n" +
+    "WHERE TO LOOK:\n" +
+    "- Driver-side door jamb sticker (most common) — a white or silver sticker with a barcode and alphanumeric string\n" +
+    "- Dashboard plate visible through the lower-left windshield from outside\n" +
+    "- Never a license plate, unit number, or barcode alone\n\n" +
+    "VIN RULES — apply these strictly:\n" +
+    "- Exactly 17 characters. Letters A-H, J-N, P-Z and digits 0-9 ONLY.\n" +
+    "- NEVER contains the letters I, O, or Q. If you see one, substitute: I→1, O→0, Q→9\n" +
+    "- Position 10 = model year: must be a letter (A-H, J-N, P-Y) or digit (1-9)\n" +
+    "- Common look-alikes: B↔8, S↔5, Z↔2, D↔0, G↔6, T↔1, U↔0\n\n" +
+    "METHOD:\n" +
+    "1. Find the VIN string in the image\n" +
+    "2. Read each character LEFT TO RIGHT, one at a time — do not skip any\n" +
+    "3. Count as you go. You need exactly 17.\n" +
+    "4. Apply the substitution rules above to any ambiguous characters\n" +
+    "5. Double-check: no I, O, Q. Count = 17.\n\n" +
+    "OUTPUT: ONLY the 17-character VIN. No spaces, no dashes, no label, no explanation.\n" +
+    "If no VIN is visible at all: NOTFOUND";
 
-  // First attempt
   let raw = await geminiVision(file, VIN_PROMPT);
-  let clean = raw.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,"");
+  let clean = raw.toUpperCase().replace(/[IOQ]/g, c => c==="I"?"1":c==="O"?"0":"9").replace(/[^A-HJ-NPR-Z0-9]/g,"");
   if (clean.length === 17) return clean;
 
-  // Second attempt — more aggressive prompt
-  const retry =
-    "SECOND ATTEMPT. Look very carefully at the door jamb sticker or dashboard VIN plate.\n" +
-    "Count EXACTLY 17 characters. Replace any I, O, or Q with their likely substitutes (I→1 or J, O→0, Q→0 or G).\n" +
-    "Spell each character out loud mentally before typing it. Do not skip any.\n" +
-    "Return ONLY the 17-character VIN. No spaces, no dashes, no explanation. Or NOTFOUND.";
-  raw = await geminiVision(file, retry);
-  clean = raw.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,"");
+  const RETRY_PROMPT =
+    "Look again at this image. Find the VIN sticker — it is on the driver-side door jamb or dashboard.\n" +
+    "The VIN is exactly 17 characters. Read EVERY character carefully.\n" +
+    "Replace any I with 1, any O with 0, any Q with 9.\n" +
+    "Count your result — must be exactly 17.\n" +
+    "Return ONLY the 17-character VIN or NOTFOUND.";
+  raw = await geminiVision(file, RETRY_PROMPT);
+  clean = raw.toUpperCase().replace(/[IOQ]/g, c => c==="I"?"1":c==="O"?"0":"9").replace(/[^A-HJ-NPR-Z0-9]/g,"");
   return clean.length === 17 ? clean : null;
 }
 
-async function readPlateAndUnitFromImage(file) {
-  const raw = await geminiVision(file,
-    "You are scanning a fleet vehicle in potentially dark, rainy, or low-contrast conditions. Do your absolute best even if the image is imperfect.\n" +
-    "Find TWO things and return them on separate lines:\n" +
-    "LINE 1: The LICENSE PLATE — the metal or plastic tag with alphanumeric characters. It may be dirty, wet, or partially lit. Read every character carefully left to right. Oregon plates: 3 letters + 3 digits. Washington plates: 3 letters + 4 digits. Write: PLATE:<characters>\n" +
-    "LINE 2: The UNIT NUMBER — a short 2–6 digit fleet number painted large on the door, hood, or cab of the vehicle. It is NOT the plate and NOT the VIN. If no unit number is visible on this vehicle, write: UNIT:NOTFOUND\n" +
-    "Return ONLY these two lines. No extra text, no explanation.\n" +
-    "Example:\nPLATE:ABC123\nUNIT:4521"
+async function readPlateFromImage(file) {
+  let raw = await geminiVision(file,
+    "READ THE LICENSE PLATE in this photo. This is your only job — ignore everything else.\n" +
+    "The plate is the metal or plastic tag mounted on the vehicle.\n" +
+    "Oregon plates: 3 letters then 3 digits (e.g. ABC123). Washington plates: 3 letters then 4 digits (e.g. ABC1234).\n" +
+    "Read EVERY character left to right. Do NOT stop early. Do NOT skip the first or last character.\n" +
+    "Common look-alikes: 0 vs O, 1 vs I, 8 vs B, 5 vs S — pick the one that fits the plate pattern.\n" +
+    "Return ONLY the plate characters. No spaces, no state name, no punctuation.\n" +
+    "If no plate is visible: NOTFOUND"
   );
-  const plateMatch = raw.match(/PLATE:([A-Z0-9]{2,10})/i);
-  const unitRaw    = raw.match(/UNIT:([A-Z0-9\-]{1,10})/i);
-  const unitVal    = unitRaw && !/NOTFOUND/i.test(unitRaw[1]) ? unitRaw[1].toUpperCase() : null;
-  return {
-    plate: plateMatch ? plateMatch[1].toUpperCase().replace(/[^A-Z0-9]/g,"") : null,
-    unit:  unitVal,
-  };
+  let clean = raw.toUpperCase().replace(/[^A-Z0-9]/g,"");
+  if (clean && clean !== "NOTFOUND" && clean.length >= 4) return clean;
+
+  raw = await geminiVision(file,
+    "Look at the license plate on this vehicle. Read ALL characters from left to right — do not cut short.\n" +
+    "Oregon = 6 chars (e.g. ABC123). Washington = 7 chars (e.g. ABC1234).\n" +
+    "Return ONLY the alphanumeric characters, nothing else. Or NOTFOUND."
+  );
+  clean = raw.toUpperCase().replace(/[^A-Z0-9]/g,"");
+  return clean && clean !== "NOTFOUND" && clean.length >= 4 ? clean : null;
+}
+
+async function readUnitNumberFromImage(file) {
+  const raw = await geminiVision(file,
+    "Look at this fleet/utility vehicle. Find the UNIT NUMBER — a short number (usually 2–6 digits) painted or stickered on the door, hood, or cab.\n" +
+    "The unit number is LARGE and clearly visible. It is NOT the license plate and NOT the VIN.\n" +
+    "Return ONLY the unit number digits. No extra text.\n" +
+    "If no unit number is visible on this vehicle: NOTFOUND"
+  );
+  const clean = raw.toUpperCase().replace(/[^A-Z0-9\-]/g,"");
+  if (!clean || /NOTFOUND/.test(clean) || clean.length < 1) return null;
+  return clean;
+}
+
+async function readPlateAndUnitFromImage(file) {
+  const [plate, unit] = await Promise.all([
+    readPlateFromImage(file),
+    readUnitNumberFromImage(file),
+  ]);
+  return { plate, unit };
 }
 
 async function decodeVin(vin) {
@@ -289,7 +315,6 @@ function StatusPill({ color, label }) {
 function CameraCapture({ label, hint, onCapture, captured }) {
   const ref = useRef();
   const onChange = e => { const f=e.target.files[0]; if(f) onCapture({file:f, url:URL.createObjectURL(f)}); };
-
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <p style={{ fontFamily:"var(--body)", fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:0 }}>{hint}</p>
@@ -418,34 +443,20 @@ function ConfirmationCard({ data, sheetStatus, sheetAction, sheetDebugMsg, queue
           {isQueued?"SAVED LOCALLY":"VEHICLE LOGGED"}
         </div>
         <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:8, marginBottom:18 }}>{new Date().toLocaleString()}</div>
-
         {isQueued ? (
           <div style={{ display:"flex", flexDirection:"column", gap:10, alignItems:"center" }}>
             <StatusPill color="var(--amber)" label="Queued — will sync when online" />
-            {sheetDebugMsg && (
-              <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", maxWidth:280 }}>{sheetDebugMsg}</div>
-            )}
-            {queueCount > 0 && (
-              <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", letterSpacing:"0.06em" }}>
-                {queueCount} record{queueCount>1?"s":""} waiting to sync
-              </div>
-            )}
+            {sheetDebugMsg && <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", maxWidth:280 }}>{sheetDebugMsg}</div>}
+            {queueCount > 0 && <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", letterSpacing:"0.06em" }}>{queueCount} record{queueCount>1?"s":""} waiting to sync</div>}
             <button onClick={onRetrySync} disabled={syncing} style={{
               marginTop:4, background:"rgba(255,184,0,0.12)", border:"1px solid rgba(255,184,0,0.4)",
               borderRadius:3, padding:"9px 20px", color:"var(--amber)", fontFamily:"var(--mono)",
-              fontSize:11, cursor:syncing?"not-allowed":"pointer", letterSpacing:"0.08em",
-              opacity:syncing?0.5:1
-            }}>
-              {syncing?"SYNCING...":"↑ RETRY SYNC NOW"}
-            </button>
+              fontSize:11, cursor:syncing?"not-allowed":"pointer", letterSpacing:"0.08em", opacity:syncing?0.5:1
+            }}>{syncing?"SYNCING...":"↑ RETRY SYNC NOW"}</button>
           </div>
         ) : (
           <>
-            {sheetAction && (
-              <div style={{ marginBottom:10 }}>
-                <StatusPill color={sheetAction==="NEW VEHICLE"?"var(--cyan)":"var(--amber)"} label={sheetAction==="NEW VEHICLE"?"NEW RECORD ADDED":"RECORD UPDATED"} />
-              </div>
-            )}
+            {sheetAction && <div style={{ marginBottom:10 }}><StatusPill color={sheetAction==="NEW VEHICLE"?"var(--cyan)":"var(--amber)"} label={sheetAction==="NEW VEHICLE"?"NEW RECORD ADDED":"RECORD UPDATED"} /></div>}
             <StatusPill
               color={sheetStatus==="synced"?"var(--green)":sheetStatus==="pending"?"var(--amber)":"var(--muted)"}
               label={sheetStatus==="synced"?"Synced to Google Sheets":sheetStatus==="pending"?"Syncing...":"No Sheet"}
@@ -520,36 +531,82 @@ function App() {
   const [assignedTo,   setAssignedTo]   = useState("");
   const [notes,        setNotes]        = useState("");
   const [submitted,    setSubmitted]    = useState(false);
-  const [sheetStatus,   setSheetStatus]   = useState("no-sheet");
-  const [sheetAction,   setSheetAction]   = useState("");
-  const [sheetDebugMsg, setSheetDebugMsg] = useState("");
-  const [existingRecord, setExistingRecord] = useState(null);
-  const [isOnline,      setIsOnline]      = useState(navigator.onLine);
-  const [queueCount,    setQueueCount]    = useState(0);
-  const [syncing,       setSyncing]       = useState(false);
+  const [sheetStatus,  setSheetStatus]  = useState("no-sheet");
+  const [sheetAction,  setSheetAction]  = useState("");
+  const [sheetDebugMsg,setSheetDebugMsg]= useState("");
+  const [existingRecord,setExistingRecord]=useState(null);
+  const [isOnline,     setIsOnline]     = useState(navigator.onLine);
+  const [queueCount,   setQueueCount]   = useState(0);
+  const [syncing,      setSyncing]      = useState(false);
 
-  const QUEUE_KEY = "fleetbuddy_queue";
-  const getQueue  = () => { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)||"[]"); } catch { return []; } };
-  const saveQueue = q => { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); setQueueCount(q.length); };
+  const isFamilyPilot = department === "Dear Friends and Family";
+  const visibleSteps = [
+    { id:"plate",   label:"Plate + Unit #", short:"PLATE",  num:"01" },
+    { id:"vin",     label:"VIN",            short:"VIN",    num:"02" },
+    { id:"details", label:"Details",        short:"DETAILS",num:"03" },
+  ];
+  const currentStepId = visibleSteps[step]?.id;
+
+  // ── IndexedDB queue ──────────────────────────────────────────────────────────
+  const DB_NAME = "fleetbuddy", STORE = "queue", DB_VER = 1;
+  const openDB = () => new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, DB_VER);
+    r.onupgradeneeded = e => e.target.result.createObjectStore(STORE, { keyPath:"entryId" });
+    r.onsuccess = e => res(e.target.result);
+    r.onerror   = () => rej(r.error);
+  });
+  const getQueue = async () => {
+    try {
+      const db = await openDB();
+      return new Promise((res, rej) => {
+        const tx = db.transaction(STORE, "readonly");
+        const req = tx.objectStore(STORE).getAll();
+        req.onsuccess = () => res(req.result||[]);
+        req.onerror   = () => rej(req.error);
+      });
+    } catch { return []; }
+  };
+  const addToQueue = async item => {
+    try {
+      const db = await openDB();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(STORE, "readwrite");
+        const req = tx.objectStore(STORE).put(item);
+        req.onsuccess = () => res(); req.onerror = () => rej(req.error);
+      });
+      const all = await getQueue(); setQueueCount(all.length);
+    } catch(e) { console.warn("Queue write failed:", e); }
+  };
+  const removeFromQueue = async entryId => {
+    try {
+      const db = await openDB();
+      await new Promise((res, rej) => {
+        const tx = db.transaction(STORE, "readwrite");
+        const req = tx.objectStore(STORE).delete(entryId);
+        req.onsuccess = () => res(); req.onerror = () => rej(req.error);
+      });
+    } catch {}
+  };
 
   const syncQueue = async () => {
-    const q = getQueue();
+    const q = await getQueue();
     if (!q.length || !navigator.onLine) return;
     setSyncing(true);
-    const failed = [];
     for (const item of q) {
       try {
         const res  = await fetch(SHEET_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(item) });
-        const json = await res.json();
-        if (!json.success) failed.push(item);
-      } catch { failed.push(item); }
+        const text = await res.text();
+        let json; try { json = JSON.parse(text); } catch { continue; }
+        if (json.success) await removeFromQueue(item.entryId);
+      } catch { /* leave in queue */ }
     }
-    saveQueue(failed);
+    const remaining = await getQueue();
+    setQueueCount(remaining.length);
     setSyncing(false);
   };
 
   useEffect(() => {
-    setQueueCount(getQueue().length);
+    getQueue().then(q => setQueueCount(q.length));
     const up   = () => { setIsOnline(true);  syncQueue(); };
     const down = () => setIsOnline(false);
     window.addEventListener("online",  up);
@@ -570,15 +627,6 @@ function App() {
     loadConfig();
   }, []);
 
-  const isFamilyPilot = department === "Dear Friends and Family";
-
-  const visibleSteps = [
-    { id:"plate",   label:"Plate + Unit #", short:"PLATE",  num:"01" },
-    { id:"vin",     label:"VIN",            short:"VIN",    num:"02" },
-    { id:"details", label:"Details",        short:"DETAILS",num:"03" },
-  ];
-  const currentStepId = visibleSteps[step]?.id;
-
   const canAdvance = (() => {
     if (currentStepId==="plate") {
       const plateOk = plateScanState==="done" || (plateScanState==="no_read" && manualPlate.trim().length >= 2);
@@ -593,8 +641,7 @@ function App() {
   const handleComboCapture = async data => {
     setComboPhoto(data); setComboScanState("reading");
     setDetectedPlate(""); setManualPlate(""); setPlateError("");
-    setDetectedTruck(""); setManualTruck("");
-    setNoUnitNumber(false);
+    setDetectedTruck(""); setManualTruck(""); setNoUnitNumber(false);
     setPlatePhoto(data); setTruckPhoto(data);
     try {
       const result = await readPlateAndUnitFromImage(data.file);
@@ -668,9 +715,9 @@ function App() {
       vin:          detectedVin  ||manualVin  ||"",
       licensePlate: detectedPlate||manualPlate||"",
       unitNumber:   detectedTruck||manualTruck||"",
-      year:         vehicleInfo?.year||"",      make:vehicleInfo?.make||"",
-      model:        vehicleInfo?.model||"",     trim:vehicleInfo?.trim||"",
-      body:         vehicleInfo?.body||"",      engine:vehicleInfo?.engine||"",
+      year:         vehicleInfo?.year||"",  make:vehicleInfo?.make||"",
+      model:        vehicleInfo?.model||"", trim:vehicleInfo?.trim||"",
+      body:         vehicleInfo?.body||"",  engine:vehicleInfo?.engine||"",
       cylinders:    vehicleInfo?.cylinders||"", drive:vehicleInfo?.drive||"",
       fuel:         vehicleInfo?.fuel||"",
       submittedBy, department, location, assignedTo, notes,
@@ -680,23 +727,19 @@ function App() {
     };
 
     if (!navigator.onLine) {
-      const q = getQueue(); q.push(payload); saveQueue(q);
+      await addToQueue(payload);
       setSheetStatus("queued");
       return;
     }
 
     setSheetStatus("pending");
     try {
-      const res = await fetch(SHEET_URL, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
-      });
+      const res = await fetch(SHEET_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
       const rawText = await res.text();
       let json;
       try { json = JSON.parse(rawText); }
       catch {
-        const q = getQueue(); q.push(payload); saveQueue(q);
-        setSheetStatus("queued");
+        await addToQueue(payload); setSheetStatus("queued");
         setSheetDebugMsg("Server returned non-JSON — queued for retry.");
         return;
       }
@@ -704,14 +747,12 @@ function App() {
         setSheetStatus("synced");
         if (json.action) setSheetAction(json.action);
       } else {
-        const q = getQueue(); q.push(payload); saveQueue(q);
-        setSheetStatus("queued");
-        setSheetDebugMsg(json.error || json.message || "Unknown error — queued for retry.");
+        await addToQueue(payload); setSheetStatus("queued");
+        setSheetDebugMsg(json.error || json.message || "Apps Script error — queued for retry.");
       }
     } catch(e) {
-      const q = getQueue(); q.push(payload); saveQueue(q);
-      setSheetStatus("queued");
-      setSheetDebugMsg("Network error — will auto-sync when connectivity returns.");
+      await addToQueue(payload); setSheetStatus("queued");
+      setSheetDebugMsg("Network error — queued for retry when connectivity returns.");
     }
   };
 
@@ -750,13 +791,12 @@ function App() {
 
       {/* Content */}
       <div style={{ width:"100%", maxWidth:480, padding:"20px 16px 48px" }}>
-
         {submitted ? (
           <ConfirmationCard
             data={{ platePhoto, vinPhoto, truckPhoto, plate:detectedPlate||manualPlate, unitNumber:detectedTruck||manualTruck, vin:detectedVin||manualVin, vehicleInfo, submittedBy, department, location, assignedTo, notes }}
             sheetStatus={sheetStatus} sheetAction={sheetAction} sheetDebugMsg={sheetDebugMsg}
             queueCount={queueCount} syncing={syncing}
-            onRetrySync={async()=>{ await syncQueue(); if(sheetStatus==="queued"&&getQueue().length<queueCount) setSheetStatus("synced"); }}
+            onRetrySync={syncQueue}
             onReset={reset}
           />
         ) : (
@@ -804,7 +844,6 @@ function App() {
                       One photo reads both. Get the side or rear of the truck — plate and unit number both in frame. Works in low light and rain.
                     </p>
                   </div>
-
                   <CameraCapture label="Plate + Unit Number" hint="Side or rear of truck — plate AND painted unit number both visible" onCapture={handleComboCapture} captured={comboPhoto} />
 
                   {comboScanState==="reading" && (
@@ -812,7 +851,7 @@ function App() {
                       <div style={{ width:16, height:16, border:"2px solid var(--amber)", borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.75s linear infinite", flexShrink:0 }} />
                       <div>
                         <div style={{ fontFamily:"var(--display)", fontSize:16, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)" }}>SCANNING...</div>
-                        <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>AI reading plate + unit number...</div>
+                        <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>Reading plate and unit number simultaneously...</div>
                       </div>
                     </div>
                   )}
@@ -833,8 +872,7 @@ function App() {
                         <div className="animate-in" style={{ background:"rgba(255,184,0,0.05)", border:"1px solid rgba(255,184,0,0.25)", borderRadius:4, padding:"14px 16px" }}>
                           <div style={{ fontFamily:"var(--display)", fontSize:15, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)", marginBottom:10 }}>⚠ NO UNIT # DETECTED</div>
                           <ManualEntry label="unit number" value={manualTruck} setValue={setManualTruck} onSubmit={handleManualTruck} btnLabel="CONFIRM UNIT # →" maxLen={10} />
-                          <button
-                            onClick={()=>{ setNoUnitNumber(true); setDetectedTruck(""); setManualTruck(""); }}
+                          <button onClick={()=>{ setNoUnitNumber(true); setDetectedTruck(""); setManualTruck(""); }}
                             style={{ marginTop:10, width:"100%", background:"transparent", border:"1px solid var(--border2)", borderRadius:3, padding:"11px", color:"var(--muted)", fontFamily:"var(--mono)", fontSize:10, cursor:"pointer", letterSpacing:"0.08em" }}>
                             NO UNIT # ON THIS VEHICLE — SKIP
                           </button>
@@ -876,7 +914,6 @@ function App() {
                     <DataTag label="Unit #" value={noUnitNumber?"N/A":detectedTruck||manualTruck||"—"} color="var(--amber)" />
                     <DataTag label="VIN" value={(detectedVin||manualVin)?.length>9?(detectedVin||manualVin).slice(0,9)+"…":(detectedVin||manualVin)} color="var(--green)" />
                   </div>
-
                   {vehicleInfo && (
                     <div style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:4, padding:"12px 14px" }}>
                       <div style={{ fontFamily:"var(--mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Decoded Vehicle</div>
@@ -884,7 +921,6 @@ function App() {
                       <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>{[vehicleInfo.trim,vehicleInfo.body,vehicleInfo.engine,vehicleInfo.fuel].filter(Boolean).join("  ·  ")}</div>
                     </div>
                   )}
-
                   <div>
                     <label className="field-label">Your Name <span style={{ color:"var(--red)" }}>*</span></label>
                     <input value={submittedBy} onChange={e=>setSubmittedBy(e.target.value)} placeholder="First and last name" className={`field-input ${submittedBy?"filled":""}`} />
@@ -917,7 +953,6 @@ function App() {
                     <label className="field-label">Notes <span style={{ color:"var(--muted)", fontWeight:400 }}>(optional)</span></label>
                     <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Damage, odometer, special instructions..." rows={3} className="field-input" style={{ resize:"none" }} />
                   </div>
-
                   {existingRecord && (
                     <BracketCard accent="amber">
                       <div style={{ fontFamily:"var(--display)", fontSize:15, fontWeight:700, letterSpacing:"0.1em", color:"var(--amber)", marginBottom:8 }}>⚠ EXISTING RECORD FOUND</div>
@@ -926,7 +961,6 @@ function App() {
                       <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--amber)", marginTop:8, letterSpacing:"0.06em" }}>→ SUBMIT WILL UPDATE THIS RECORD</div>
                     </BracketCard>
                   )}
-
                   <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", background:"rgba(0,232,122,0.04)", border:"1px solid rgba(0,232,122,0.12)", borderRadius:4 }}>
                     <span style={{ fontSize:14 }}>📊</span>
                     <div>
@@ -972,4 +1006,4 @@ function App() {
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
-</html>
+</html> 
