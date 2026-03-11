@@ -43,8 +43,8 @@
 <script type="text/babel">
 const { useState, useRef, useEffect } = React;
 
-const SHEET_URL = "https://script.google.com/macros/s/AKfycbz0SZ0W-wBmwEe4vd0hwxuIp9Yh5XV88udlZF0wHMETROqlHb1OceN_JuoYpPm7g3o/exec";
-const GEMINI_URL = "/api/gemini";
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbyS0eSQyY-08N1DeU-WyNEmMlFOazenEH24NNbbZ8qvmFCpAXYShHSQBFN_6pGs0a53/exec";
+const PR_URL    = "/api/platerecognizer";
 
 const DEFAULT_DEPARTMENTS = [
   "Construction","Contract Management","Engineering","Facilities",
@@ -67,139 +67,69 @@ const DEFAULT_LOCATIONS = [
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const toBase64 = file => new Promise((res, rej) => {
+// Resize + encode image to base64 JPEG for API calls
+const toBase64 = (file, maxPx = 1920) => new Promise((res, rej) => {
   const img = new Image();
   const url = URL.createObjectURL(file);
   img.onload = () => {
-    let w = img.width, h = img.height, MAX = 2048;
-    if (w > MAX || h > MAX) { if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;} }
-    const c = document.createElement("canvas"); c.width=w; c.height=h;
-    c.getContext("2d").drawImage(img,0,0,w,h);
+    let w = img.width, h = img.height;
+    if (w > maxPx || h > maxPx) {
+      if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+      else        { w = Math.round(w * maxPx / h); h = maxPx; }
+    }
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    c.getContext("2d").drawImage(img, 0, 0, w, h);
     URL.revokeObjectURL(url);
-    res(c.toDataURL("image/jpeg",0.92).split(",")[1]);
+    res(c.toDataURL("image/jpeg", 0.92).split(",")[1]);
   };
-  img.onerror = () => rej(new Error("load failed"));
+  img.onerror = () => rej(new Error("Image load failed"));
   img.src = url;
 });
 
-async function geminiVision(file, prompt) {
+// ── Plate Recognizer: License Plate ──────────────────────────
+async function scanPlate(file) {
   try {
-    const b64 = await toBase64(file);
+    const b64 = await toBase64(file, 1920);
     const ctrl = new AbortController();
-    const tid = setTimeout(()=>ctrl.abort(), 25000);
-    const resp = await fetch(GEMINI_URL, {
-      method:"POST", headers:{"Content-Type":"application/json"}, signal:ctrl.signal,
-      body: JSON.stringify({ contents:[{parts:[{inline_data:{mime_type:file.type||"image/jpeg",data:b64}},{text:prompt}]}], generationConfig:{maxOutputTokens:60,temperature:0} })
+    const tid  = setTimeout(() => ctrl.abort(), 20000);
+    const resp = await fetch(PR_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: ctrl.signal,
+      body: JSON.stringify({ image: b64, mode: "plate" }),
     });
     clearTimeout(tid);
     const data = await resp.json();
-    if (data.error) return "";
-    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-  } catch { return ""; }
-}
-
-// Crop a file to a region (0.0–1.0 fractions) and return a new File-like Blob
-function cropImage(file, x, y, w, h) {
-  return new Promise((res, rej) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const sw = Math.round(img.width * w),  sh = Math.round(img.height * h);
-      const sx = Math.round(img.width * x),  sy = Math.round(img.height * y);
-      const c = document.createElement("canvas"); c.width = sw; c.height = sh;
-      c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-      URL.revokeObjectURL(url);
-      c.toBlob(b => { if(b){ const f=new File([b],"crop.jpg",{type:"image/jpeg"}); res(f); } else rej(); }, "image/jpeg", 0.95);
-    };
-    img.onerror = rej;
-    img.src = url;
-  });
-}
-
-// Plate: 4-attempt strategy — full image x2, then cropped bottom-third x2
-async function scanPlate(file) {
-  const PLATE_PROMPT =
-    "READ THE LICENSE PLATE. This is your only task.\n" +
-    "The plate is a rectangular tag with alphanumeric characters mounted on the vehicle.\n" +
-    "CRITICAL: Read EVERY character from LEFT to RIGHT. Do not stop after 3 or 4 characters — read the FULL plate.\n" +
-    "Oregon plates have 6 characters: 3 letters then 3 digits (e.g. ABC123).\n" +
-    "Washington plates have 7 characters: 3 letters then 4 digits (e.g. ABC1234).\n" +
-    "You MUST return all 6 or 7 characters. A 2, 3, or 4 character answer is WRONG and incomplete.\n" +
-    "Common look-alikes: O↔0, I↔1, B↔8, S↔5, Z↔2.\n" +
-    "Return ONLY the characters — no spaces, no state name, no punctuation. Or NOTFOUND.";
-
-  const PLATE_PROMPT2 =
-    "Find the license plate on this vehicle and read ALL of its characters.\n" +
-    "Count: Oregon = 6 chars, Washington = 7 chars. You need all of them.\n" +
-    "Say each character aloud in your mind before typing: first char, second char, third... all the way to the last.\n" +
-    "Return ONLY those characters with nothing else. Or NOTFOUND.";
-
-  const tryRead = async (f, prompt) => {
-    const raw = await geminiVision(f, prompt);
-    const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (clean && clean !== "NOTFOUND" && clean.length >= 5) return clean;
+    if (data.found && data.plate) return data.plate;
     return null;
-  };
-
-  // Attempt 1 — full image, strong prompt
-  let result = await tryRead(file, PLATE_PROMPT);
-  if (result) return result;
-
-  // Attempt 2 — full image, different framing
-  result = await tryRead(file, PLATE_PROMPT2);
-  if (result) return result;
-
-  // Attempt 3 — crop bottom 40% of image (plate usually there) + strong prompt
-  try {
-    const cropped = await cropImage(file, 0, 0.55, 1, 0.45);
-    result = await tryRead(cropped, PLATE_PROMPT);
-    if (result) return result;
-
-    // Attempt 4 — crop + second prompt
-    result = await tryRead(cropped, PLATE_PROMPT2);
-    if (result) return result;
-  } catch {}
-
-  return null;
+  } catch (e) {
+    console.warn("scanPlate error:", e.message);
+    return null;
+  }
 }
 
-// VIN: dedicated single-job prompt with 3 attempts
+// ── Plate Recognizer: VIN OCR ─────────────────────────────────
 async function scanVin(file) {
-  const attempt = async (prompt) => {
-    const raw = await geminiVision(file, prompt);
-    // Apply I/O/Q substitution before stripping
-    return raw.toUpperCase()
-      .replace(/I/g,"1").replace(/O/g,"0").replace(/Q/g,"9")
-      .replace(/[^A-HJ-NPR-Z0-9]/g,"");
-  };
-
-  const p1 =
-    "Your ONLY job: read the 17-character VIN from this vehicle photo.\n" +
-    "WHERE TO LOOK: driver-side door jamb sticker, or dashboard plate at lower windshield.\n" +
-    "VIN = exactly 17 chars using A-H, J-N, P-Z, 0-9. Never I, O, or Q.\n" +
-    "Read left-to-right one character at a time. Count to 17.\n" +
-    "Common errors: B↔8, S↔5, Z↔2, G↔6, D↔0.\n" +
-    "Output ONLY the 17 characters. No spaces, dashes, or labels. Or NOTFOUND.";
-  let c = await attempt(p1);
-  if (c.length === 17) return c;
-
-  const p2 =
-    "Find the VIN on the door jamb sticker or dashboard plate.\n" +
-    "It is exactly 17 characters. Read each one carefully.\n" +
-    "Replace I→1, O→0, Q→9.\n" +
-    "Output ONLY 17 characters. Count them. Or NOTFOUND.";
-  c = await attempt(p2);
-  if (c.length === 17) return c;
-
-  const p3 =
-    "Look very carefully. Find any 17-character alphanumeric code on a sticker or plate on this vehicle.\n" +
-    "That is the VIN. Output only those 17 characters. Replace I with 1, O with 0, Q with 9.";
-  c = await attempt(p3);
-  if (c.length === 17) return c;
-
-  // If close (15-19 chars), flag for manual review but return it so user can correct
-  if (c.length >= 14 && c.length <= 19) return c;
-  return null;
+  try {
+    const b64 = await toBase64(file, 1920);
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 20000);
+    const resp = await fetch(PR_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: ctrl.signal,
+      body: JSON.stringify({ image: b64, mode: "vin" }),
+    });
+    clearTimeout(tid);
+    const data = await resp.json();
+    if (data.found && data.vin) return data.vin;
+    // Return partial if close — lets user correct in manual field
+    if (data.vinRaw && data.vinRaw.length >= 14) return data.vinRaw;
+    return null;
+  } catch (e) {
+    console.warn("scanVin error:", e.message);
+    return null;
+  }
 }
 
 async function decodeVin(vin) {
