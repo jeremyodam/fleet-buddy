@@ -134,11 +134,11 @@ const DEFAULT_LOCATIONS = [
 
 // ── Image / API helpers ──────────────────────────────────────────────────────
 
-const toBase64 = file => new Promise((res, rej) => {
+const toBase64 = (file, maxSize=2048) => new Promise((res, rej) => {
   const img = new Image();
   const url = URL.createObjectURL(file);
   img.onload = () => {
-    const MAX = 1024;
+    const MAX = maxSize;
     let w = img.width, h = img.height;
     if (w > MAX || h > MAX) {
       if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
@@ -148,7 +148,7 @@ const toBase64 = file => new Promise((res, rej) => {
     canvas.width = w; canvas.height = h;
     canvas.getContext("2d").drawImage(img, 0, 0, w, h);
     URL.revokeObjectURL(url);
-    res(canvas.toDataURL("image/jpeg", 0.85).split(",")[1]);
+    res(canvas.toDataURL("image/jpeg", 0.92).split(",")[1]);
   };
   img.onerror = () => rej(new Error("Image load failed"));
   img.src = url;
@@ -190,11 +190,13 @@ async function geminiVision(file, prompt) {
 
 async function readPlateFromImage(file) {
   const raw = await geminiVision(file,
-    "Your only job: find and read the LICENSE PLATE in this photo. " +
-    "A license plate is a rectangular metal tag on the front or rear of the vehicle with letters and numbers. " +
-    "Ignore all other text — unit numbers, VINs, stickers, road signs, anything else. " +
-    "Return ONLY the license plate characters exactly as they appear, no spaces, no state name, no punctuation. " +
-    "If you cannot find a license plate, return NOTFOUND."
+    "Your only job: read the LICENSE PLATE in this photo. " +
+    "License plates have 4 to 8 characters total — read ALL of them, do not stop early. " +
+    "Read every single character left to right. Double-check you have not missed the first or last character. " +
+    "Oregon plates are 3 letters + 3 digits (e.g. ABC123). Washington plates are 3 letters + 4 digits (e.g. ABC1234). " +
+    "Ignore everything else — unit numbers, VINs, stickers, decals, road signs. " +
+    "Return ONLY the plate characters with no spaces, no state name, no punctuation. " +
+    "If no plate is visible, return NOTFOUND."
   );
   const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g,"");
   if (!clean||clean==="NOTFOUND"||clean.length<2) {
