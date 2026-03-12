@@ -2,6 +2,7 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
@@ -48,7 +49,6 @@ export default async function handler(req, res) {
         generationConfig: {
           temperature: 0,
           maxOutputTokens: 120,
-          responseMimeType: "application/json",
         },
       }),
     });
@@ -63,9 +63,7 @@ export default async function handler(req, res) {
     }
 
     if (!response.ok || data.error) {
-      const message =
-        data?.error?.message || `Gemini HTTP ${response.status}`;
-
+      const message = data?.error?.message || `Gemini HTTP ${response.status}`;
       const err = new Error(message);
       err.status = response.status;
       err.raw = data;
@@ -82,7 +80,6 @@ export default async function handler(req, res) {
     for (const model of GEMINI_MODELS) {
       try {
         const { text, raw } = await callGemini(model, prompt);
-
         const clean = text.replace(/```json|```/g, "").trim();
 
         try {
@@ -116,8 +113,19 @@ export default async function handler(req, res) {
 
     let errorType = "gemini_error";
     if (msg.includes("api key")) errorType = "missing_api_key";
-    else if (msg.includes("quota") || msg.includes("rate limit") || lastError?.status === 429) errorType = "quota_exceeded";
-    else if (msg.includes("not found") || msg.includes("not supported") || msg.includes("model")) errorType = "invalid_model";
+    else if (
+      msg.includes("quota") ||
+      msg.includes("rate limit") ||
+      lastError?.status === 429
+    ) {
+      errorType = "quota_exceeded";
+    } else if (
+      msg.includes("not found") ||
+      msg.includes("not supported") ||
+      msg.includes("model")
+    ) {
+      errorType = "invalid_model";
+    }
 
     return {
       found: false,
@@ -140,6 +148,7 @@ If you cannot clearly read the plate, set found to false.
   "plate": "",
   "low_confidence": false
 }`);
+
       if (!result.found || !result.plate) {
         return res.json({
           found: false,
@@ -192,6 +201,7 @@ If no clear unit number is visible, set found to false.
   "unit_number": "",
   "low_confidence": false
 }`);
+
       if (!result.found || !result.unit_number) {
         return res.json({
           found: false,
@@ -245,6 +255,7 @@ If you cannot clearly read a valid VIN, set found to false.
   "vin": "",
   "low_confidence": false
 }`);
+
       if (!result.found || !result.vin) {
         return res.json({
           found: false,
@@ -256,7 +267,10 @@ If you cannot clearly read a valid VIN, set found to false.
         });
       }
 
-      const clean = result.vin.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+      const clean = result.vin
+        .toUpperCase()
+        .replace(/[^A-HJ-NPR-Z0-9]/g, "");
+
       if (clean.length !== 17) {
         return res.json({
           found: false,
