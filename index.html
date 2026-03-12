@@ -90,7 +90,7 @@ const toBase64 = (file, maxPx=1600) => new Promise((res,rej) => {
 async function callAPI(file, mode) {
   const b64 = await toBase64(file);
   const controller = new AbortController();
-  const tid = setTimeout(()=>controller.abort(), 25000);
+  const tid = setTimeout(()=>controller.abort(), 45000);
   try {
     const resp = await fetch(API_URL, {
       method:"POST", headers:{"Content-Type":"application/json"},
