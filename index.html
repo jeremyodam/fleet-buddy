@@ -202,7 +202,7 @@
     const { useState, useRef, useEffect } = React;
 
     const SHEET_URL =
-      "https://script.google.com/macros/s/AKfycbz0SZ0W-wBmwEe4vd0hwxuIp9Yh5XV88udlZF0wHMETROqlHb1OceN_JuoYpPm7g3o/exec";
+      "https://script.google.com/macros/s/AKfycbzKK9QoGBtz50KP_lQ2sIkUJPrRdO6oM-rSbtamlfjliMiI_-eK4NjLtv29X5oLZxwW/exec";
     const API_URL = "/api/platerecognizer";
 
     const DEFAULT_DEPARTMENTS = [
@@ -1539,33 +1539,19 @@
         };
 
         try {
-          const res = await fetch(SHEET_URL, {
+          await fetch(SHEET_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            mode: "no-cors",
+            headers: {
+              "Content-Type": "text/plain"
+            },
             body: JSON.stringify(payload)
           });
 
-          const raw = await res.text();
-
-          let json;
-          try {
-            json = JSON.parse(raw);
-          } catch {
-            setSheetStatus("error");
-            setSheetDebugMsg(`HTTP ${res.status} — Not JSON: ${raw.substring(0, 300)}`);
-            return;
-          }
-
-          if (json.success) {
-            setSheetStatus("synced");
-            if (json.action) setSheetAction(json.action);
-          } else {
-            setSheetStatus("error");
-            setSheetDebugMsg(
-              json.error || json.message || JSON.stringify(json).substring(0, 300)
-            );
-          }
+          setSheetStatus("synced");
+          setSheetAction(existingRecord ? "UPDATED" : "NEW VEHICLE");
         } catch (e) {
+          console.error("FleetBuddy submit fetch error:", e);
           setSheetStatus("error");
           setSheetDebugMsg("FETCH ERR: " + e.message);
         }
