@@ -102,7 +102,7 @@ async function callAPI(file, mode) {
     return await resp.json();
   } catch(e) {
     clearTimeout(tid);
-    return { found:false, error: e.name==="AbortError" ? "TIMEOUT (25s)" : e.message };
+    return { found:false, error: e.name==="AbortError" ? "TIMEOUT (45s)" : e.message };
   }
 }
 
