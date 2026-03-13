@@ -2022,10 +2022,10 @@
                             style={{ color: submittedBy ? "var(--text)" : "var(--muted)" }}
                           >
                             <option value="">Select your name...</option>
+                            <option value="__OTHER__">+ Add name</option>
                             {pilotMembers.map((name) => (
                               <option key={name} value={name}>{name}</option>
                             ))}
-                            <option value="__OTHER__">+ Add name</option>
                           </select>
                         )}
                       </div>
