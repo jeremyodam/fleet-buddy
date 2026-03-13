@@ -1338,6 +1338,7 @@
       const [department, setDepartment] = useState("");
       const [location, setLocation] = useState("");
       const [assignedTo, setAssignedTo] = useState("");
+      const [iAmDriver, setIAmDriver] = useState(true);
       const [notes, setNotes] = useState("");
       const [existingRecord, setExistingRecord] = useState(null);
 
@@ -1513,7 +1514,7 @@
           year: vehicleInfo?.year || "",
           make: vehicleInfo?.make || "",
           model: vehicleInfo?.model || "",
-          assignedTo,
+          assignedTo: iAmDriver ? resolvedName : assignedTo,
           submittedBy: resolvedName,
           vin: detectedVin || manualVin || "",
           trim: vehicleInfo?.trim || "",
@@ -1571,6 +1572,7 @@
         setDepartment("");
         setLocation("");
         setAssignedTo("");
+        setIAmDriver(true);
         setNotes("");
         setExistingRecord(null);
         setSubmitted(false);
@@ -2093,21 +2095,36 @@
                       </div>
 
                       <div>
-                        <label className="field-label">
-                          Assigned To <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span>
+                        <label
+                          className="field-label"
+                          style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", userSelect: "none" }}
+                          onClick={() => setIAmDriver(!iAmDriver)}
+                        >
+                          <span style={{
+                            display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            width: 20, height: 20, borderRadius: 4,
+                            border: iAmDriver ? "none" : "2px solid var(--muted)",
+                            background: iAmDriver ? "var(--cyan)" : "transparent",
+                            transition: "all 0.2s", flexShrink: 0
+                          }}>
+                            {iAmDriver && <span style={{ color: "#000", fontSize: 14, fontWeight: "bold" }}>✓</span>}
+                          </span>
+                          I am the assigned driver
                         </label>
-                        <div style={{ position: "relative" }}>
-                          <input
-                            value={assignedTo}
-                            onChange={(e) => setAssignedTo(e.target.value)}
-                            placeholder="Driver name or select below"
-                            className={`field-input ${assignedTo ? "filled" : ""}`}
-                            list="assignedToOptions"
-                          />
-                          <datalist id="assignedToOptions">
-                            <option value="Spare / Unassigned" />
-                          </datalist>
-                        </div>
+                        {!iAmDriver && (
+                          <div style={{ marginTop: 8 }}>
+                            <input
+                              value={assignedTo}
+                              onChange={(e) => setAssignedTo(e.target.value)}
+                              placeholder="Driver name, or leave blank for spare"
+                              className={`field-input ${assignedTo ? "filled" : ""}`}
+                              list="assignedToOptions"
+                            />
+                            <datalist id="assignedToOptions">
+                              <option value="Spare / Unassigned" />
+                            </datalist>
+                          </div>
+                        )}
                       </div>
 
                       <div>
