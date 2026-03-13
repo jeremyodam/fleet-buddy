@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FleetBuddy Smoke Tests</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #07090d; color: #d8e4f0; font-family: 'Courier New', monospace; padding: 24px; }
+    h1 { font-size: 18px; margin-bottom: 16px; color: #00d4ff; }
+    .test { padding: 8px 12px; margin: 4px 0; border-radius: 3px; font-size: 13px; }
+    .pass { background: #0a1a10; border-left: 3px solid #00e87a; }
+    .fail { background: #1a0a0a; border-left: 3px solid #ff4444; }
+    .skip { background: #1a1500; border-left: 3px solid #ffb800; }
+    .running { background: #0a0a1a; border-left: 3px solid #00d4ff; opacity: 0.7; }
+    .label { font-weight: bold; }
+    .pass .label { color: #00e87a; }
+    .fail .label { color: #ff4444; }
+    .skip .label { color: #ffb800; }
+    .running .label { color: #00d4ff; }
+    .detail { color: #4a6180; font-size: 11px; margin-top: 2px; }
+    #summary { margin-top: 20px; padding: 12px; border: 1px solid #1c2636; border-radius: 3px; font-size: 14px; }
+    button { background: linear-gradient(90deg,#00d4ff,#0099cc); color: #000; border: none; padding: 10px 24px; font-family: inherit; font-size: 14px; font-weight: bold; cursor: pointer; border-radius: 3px; margin-bottom: 20px; }
+    button:disabled { background: #111823; color: #4a6180; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <h1>FLEETBUDDY SMOKE TESTS</h1>
+  <button id="runBtn" onclick="runAll()">RUN TESTS</button>
+  <div id="results"></div>
+  <div id="summary"></div>
+
+  <script>
+    const SHEET_URL = "https://script.google.com/macros/s/AKfycbzKK9QoGBtz50KP_lQ2sIkUJPrRdO6oM-rSbtamlfjliMiI_-eK4NjLtv29X5oLZxwW/exec";
+    const API_URL = window.location.origin + "/api/platerecognizer";
+    const NHTSA_URL = "https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues";
+
+    const results = [];
+    const container = document.getElementById("results");
+
+    function addResult(name, status, detail) {
+      results.push({ name, status });
+      const div = document.createElement("div");
+      div.className = `test ${status}`;
+      div.innerHTML = `<span class="label">${status.toUpperCase()}</span> ${name}` +
+        (detail ? `<div class="detail">${detail}</div>` : "");
+      // Replace "running" entry if exists
+      const existing = document.querySelector(`[data-test="${name}"]`);
+      if (existing) existing.replaceWith(div);
+      else container.appendChild(div);
+      div.setAttribute("data-test", name);
+    }
+
+    function markRunning(name) {
+      const div = document.createElement("div");
+      div.className = "test running";
+      div.setAttribute("data-test", name);
+      div.innerHTML = `<span class="label">RUNNING</span> ${name}`;
+      container.appendChild(div);
+    }
+
+    async function testSheetGetConfig() {
+      const name = "Apps Script — GET getConfig";
+      markRunning(name);
+      try {
+        const resp = await fetch(`${SHEET_URL}?action=getConfig`);
+        if (!resp.ok) { addResult(name, "fail", `HTTP ${resp.status}`); return; }
+        const data = await resp.json();
+        if (data.departments && Array.isArray(data.departments)) {
+          addResult(name, "pass", `Got ${data.departments.length} departments, ${data.locations?.length || 0} locations`);
+        } else {
+          addResult(name, "fail", `Unexpected shape: ${JSON.stringify(data).substring(0, 120)}`);
+        }
+      } catch (e) {
+        addResult(name, "fail", e.message);
+      }
+    }
+
+    async function testSheetCheckVehicle() {
+      const name = "Apps Script — GET checkVehicle";
+      markRunning(name);
+      try {
+        const resp = await fetch(`${SHEET_URL}?action=checkVehicle&vin=NONEXISTENT000000&plate=FAKE`);
+        if (!resp.ok) { addResult(name, "fail", `HTTP ${resp.status}`); return; }
+        const data = await resp.json();
+        if (typeof data.found === "boolean") {
+          addResult(name, "pass", `found=${data.found} (expected false for fake VIN)`);
+        } else {
+          addResult(name, "fail", `Missing "found" field: ${JSON.stringify(data).substring(0, 120)}`);
+        }
+      } catch (e) {
+        addResult(name, "fail", e.message);
+      }
+    }
+
+    async function testSheetPostDryRun() {
+      const name = "Apps Script — POST contract (dry-run)";
+      markRunning(name);
+      try {
+        const payload = {
+          entryId: "SMOKE-" + Date.now(),
+          timestamp: new Date().toISOString(),
+          vin: "SMOKETEST00000001",
+          licensePlate: "SMOKE1",
+          unitNumber: "999",
+          unitSkipped: false,
+          year: "2025", make: "Test", model: "Smoke",
+          trim: "", body: "", engine: "", cylinders: "", drive: "", fuel: "",
+          submittedBy: "Smoke Test",
+          department: "Test",
+          location: "Test",
+          assignedTo: "",
+          notes: "Automated smoke test — safe to delete",
+          source: "FleetBuddy Smoke Test"
+        };
+
+        const resp = await fetch(SHEET_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify(payload),
+          redirect: "follow"
+        });
+
+        if (!resp.ok) { addResult(name, "fail", `HTTP ${resp.status}`); return; }
+        const data = await resp.json();
+
+        if (data.success === true && typeof data.action === "string" && data.entryId) {
+          addResult(name, "pass", `success=true action="${data.action}" entryId="${data.entryId}"`);
+        } else if (data.success === false && data.error) {
+          addResult(name, "fail", `Apps Script error: ${data.error}`);
+        } else {
+          addResult(name, "fail", `Unexpected response: ${JSON.stringify(data).substring(0, 150)}`);
+        }
+      } catch (e) {
+        addResult(name, "fail", e.message);
+      }
+    }
+
+    async function testVercelAPIContract() {
+      const name = "Vercel API — POST contract (no image)";
+      markRunning(name);
+      try {
+        const resp = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: "", mode: "plate" })
+        });
+        const data = await resp.json();
+        if (resp.status === 400 && data.error) {
+          addResult(name, "pass", `400 with error="${data.error}" (correct rejection of empty image)`);
+        } else {
+          addResult(name, "fail", `Expected 400, got ${resp.status}: ${JSON.stringify(data).substring(0, 120)}`);
+        }
+      } catch (e) {
+        addResult(name, "fail", e.message);
+      }
+    }
+
+    async function testVercelAPIModeValidation() {
+      const name = "Vercel API — rejects unknown mode";
+      markRunning(name);
+      try {
+        const resp = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: "dGVzdA==", mode: "bogus" })
+        });
+        const data = await resp.json();
+        if (resp.status === 400 && data.error && data.error.includes("bogus")) {
+          addResult(name, "pass", `400 with error="${data.error}"`);
+        } else {
+          addResult(name, "fail", `Expected 400 with mode error, got ${resp.status}: ${JSON.stringify(data).substring(0, 120)}`);
+        }
+      } catch (e) {
+        addResult(name, "fail", e.message);
+      }
+    }
+
+    async function testVercelAPIMethodCheck() {
+      const name = "Vercel API — rejects GET";
+      markRunning(name);
+      try {
+        const resp = await fetch(API_URL);
+        const data = await resp.json();
+        if (resp.status === 405) {
+          addResult(name, "pass", `405 Method Not Allowed`);
+        } else {
+          addResult(name, "fail", `Expected 405, got ${resp.status}`);
+        }
+      } catch (e) {
+        addResult(name, "fail", e.message);
+      }
+    }
+
+    async function testNHTSA() {
+      const name = "NHTSA VIN Decoder — known VIN";
+      markRunning(name);
+      try {
+        // 2015 Toyota Camry
+        const resp = await fetch(`${NHTSA_URL}/4T1BF1FK5FU123456?format=json`);
+        if (!resp.ok) { addResult(name, "fail", `HTTP ${resp.status}`); return; }
+        const data = await resp.json();
+        const r = data?.Results?.[0];
+        if (r && r.Make && r.ModelYear) {
+          addResult(name, "pass", `Decoded: ${r.ModelYear} ${r.Make} ${r.Model}`);
+        } else {
+          addResult(name, "fail", `Unexpected shape: ${JSON.stringify(data).substring(0, 120)}`);
+        }
+      } catch (e) {
+        addResult(name, "fail", e.message);
+      }
+    }
+
+    async function testPayloadValidation() {
+      const name = "Payload shape validation";
+      markRunning(name);
+
+      const required = ["entryId", "timestamp", "vin", "licensePlate", "submittedBy", "department", "location", "source"];
+      const testPayload = {
+        entryId: "FB-123", timestamp: "2025-01-01", vin: "12345678901234567",
+        licensePlate: "ABC1234", submittedBy: "Test", department: "Ops",
+        location: "HQ", source: "FleetBuddy v5.0"
+      };
+
+      const missing = required.filter(k => !testPayload[k]);
+      if (missing.length === 0) {
+        addResult(name, "pass", `All ${required.length} required fields present`);
+      } else {
+        addResult(name, "fail", `Missing fields: ${missing.join(", ")}`);
+      }
+    }
+
+    async function runAll() {
+      const btn = document.getElementById("runBtn");
+      btn.disabled = true;
+      btn.textContent = "RUNNING...";
+      container.innerHTML = "";
+      results.length = 0;
+
+      await testSheetGetConfig();
+      await testSheetCheckVehicle();
+      await testSheetPostDryRun();
+      await testVercelAPIMethodCheck();
+      await testVercelAPIContract();
+      await testVercelAPIModeValidation();
+      await testNHTSA();
+      await testPayloadValidation();
+
+      const passed = results.filter(r => r.status === "pass").length;
+      const failed = results.filter(r => r.status === "fail").length;
+      const total = results.length;
+
+      const summary = document.getElementById("summary");
+      summary.style.borderColor = failed > 0 ? "#ff4444" : "#00e87a";
+      summary.style.color = failed > 0 ? "#ff4444" : "#00e87a";
+      summary.textContent = `${passed}/${total} passed` + (failed > 0 ? ` — ${failed} FAILED` : " — ALL CLEAR");
+
+      btn.disabled = false;
+      btn.textContent = "RUN AGAIN";
+    }
+  </script>
+</body>
+</html>

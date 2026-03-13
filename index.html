@@ -327,6 +327,7 @@
           return { found: false, error: `Network error: ${e.message}. Check your internet connection.` };
         }
       }
+      return { found: false, error: "Request failed after all retries." };
     }
 
     async function callAPI(file, mode) {
@@ -1504,18 +1505,21 @@
           source: "FleetBuddy v5.0"
         };
 
+        console.log("[FleetBuddy] Submitting payload:", payload.entryId, existingRecord ? "UPDATE" : "NEW");
+
         try {
           const result = await sendToSheet(payload);
+          console.log("[FleetBuddy] Sheet response:", JSON.stringify(result));
 
-          if (result.error) {
+          if (!result || result.error) {
             setSheetStatus("error");
-            setSheetDebugMsg(result.error);
+            setSheetDebugMsg(result?.error || "No response from Google Sheets. Please try again.");
           } else {
             setSheetStatus("synced");
-            setSheetAction(existingRecord ? "UPDATED" : "NEW VEHICLE");
+            setSheetAction(result.action || (existingRecord ? "UPDATED" : "NEW VEHICLE"));
           }
         } catch (e) {
-          console.error("FleetBuddy submit error:", e);
+          console.error("[FleetBuddy] Submit error:", e);
           setSheetStatus("error");
           setSheetDebugMsg("Could not reach Google Sheets. Check your connection and try again.");
         }
