@@ -1445,6 +1445,15 @@
           const info = await decodeVin(vin);
           setVehicleInfo(info);
           setVinScanState("done");
+
+          const currentPlate = detectedPlate || manualPlate || "";
+
+          fetch(`${SHEET_URL}?action=checkVehicle&vin=${encodeURIComponent(vin)}&plate=${encodeURIComponent(currentPlate)}`)
+            .then((res) => res.json())
+            .then((j) => {
+              if (j.found) setExistingRecord(j);
+            })
+            .catch(() => {});
         } catch {
           setVinScanState("failed");
         }
