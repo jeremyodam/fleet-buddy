@@ -95,17 +95,17 @@
 
     @keyframes scanline {
       0% {
-        transform: translateY(-100%);
+        top: 0%;
         opacity: 0;
       }
-      10% {
+      5% {
         opacity: 1;
       }
-      90% {
+      95% {
         opacity: 1;
       }
       100% {
-        transform: translateY(500%);
+        top: 100%;
         opacity: 0;
       }
     }
@@ -612,10 +612,12 @@
                   position: "absolute",
                   left: 0,
                   right: 0,
-                  height: 2,
-                  background: "linear-gradient(90deg,transparent,var(--cyan),transparent)",
-                  animation: "scanline 2.8s ease-in-out infinite",
-                  opacity: 0.3
+                  top: 0,
+                  height: 3,
+                  background: "linear-gradient(90deg, transparent 5%, var(--cyan) 50%, transparent 95%)",
+                  boxShadow: "0 0 8px var(--cyan), 0 0 20px rgba(0,212,255,0.3)",
+                  animation: "scanline 1.8s ease-in-out infinite",
+                  opacity: 0.6
                 }}
               />
               <span style={{ position: "absolute", top: 10, left: 10, width: 14, height: 14, borderTop: `1px solid ${accentColor}`, borderLeft: `1px solid ${accentColor}`, opacity: 0.5 }} />
