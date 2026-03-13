@@ -200,19 +200,9 @@
     const API_URL = "/api/platerecognizer";
 
     const DEFAULT_PILOT_MEMBERS = [
-      "Beard, Bradly",
-      "Belcher, Jamaal",
-      "Castillo, Jonathon",
-      "Chamberlain, Angela",
-      "Crouch, Rick",
-      "Hosking, Nick",
-      "Hubbard, Tyler",
-      "Newton, Michael",
-      "Odam, Jeremy",
-      "Ryan, Casey",
-      "Schmitke, Grant",
-      "Shaw, Bradley",
-      "Wells, Steve"
+      "Test User 1",
+      "Test User 2",
+      "Test User 3"
     ];
 
     const DEFAULT_DEPARTMENTS = [
@@ -1804,20 +1794,54 @@
 
                   {stepId === "unit" && (
                     <div className="animate-in">
-                      <CameraCapture
-                        label="Unit Number"
-                        hint="Get close to the unit number — number only in frame, no clutter"
-                        onCapture={handleUnitCapture}
-                        captured={unitPhoto}
-                        accentColor="var(--amber)"
-                      />
+                      {unitScanState !== "failed" && unitScanState !== "done" && !unitSkipped && (
+                        <>
+                          <CameraCapture
+                            label="Unit Number"
+                            hint="Get close to the unit number — number only in frame, no clutter"
+                            onCapture={handleUnitCapture}
+                            captured={unitPhoto}
+                            accentColor="var(--amber)"
+                          />
 
-                      <ScanResult
-                        state={unitScanState}
-                        label="Unit Number"
-                        value={detectedUnit}
-                        errorMsg={unitErrorMsg}
-                      />
+                          <ScanResult
+                            state={unitScanState}
+                            label="Unit Number"
+                            value={detectedUnit}
+                            errorMsg={unitErrorMsg}
+                          />
+
+                          {unitScanState === "idle" && !unitPhoto && (
+                            <button
+                              onClick={() => setUnitScanState("failed")}
+                              style={{
+                                marginTop: 12,
+                                width: "100%",
+                                background: "transparent",
+                                border: "1px dashed var(--border2)",
+                                borderRadius: 3,
+                                padding: "11px",
+                                color: "var(--muted)",
+                                fontFamily: "var(--mono)",
+                                fontSize: 10,
+                                cursor: "pointer",
+                                letterSpacing: "0.08em"
+                              }}
+                            >
+                              SKIP CAMERA — TYPE MANUALLY
+                            </button>
+                          )}
+                        </>
+                      )}
+
+                      {unitScanState === "done" && (
+                        <ScanResult
+                          state={unitScanState}
+                          label="Unit Number"
+                          value={detectedUnit}
+                          errorMsg={unitErrorMsg}
+                        />
+                      )}
 
                       {unitScanState === "failed" && !unitSkipped && (
                         <div className="animate-in">
