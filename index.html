@@ -196,7 +196,6 @@
 </head>
 <body>
   <div id="root"></div>
-  <iframe name="hiddenFrame" style="display:none;"></iframe>
 
   <script type="text/babel">
     const { useState, useRef, useEffect } = React;
@@ -285,30 +284,59 @@
         img.src = url;
       });
 
+    async function fetchWithRetry(url, options, { retries = 2, baseDelay = 1500, timeout = 55000 } = {}) {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), timeout);
+
+        try {
+          const resp = await fetch(url, { ...options, signal: controller.signal });
+          clearTimeout(tid);
+
+          if (resp.ok) return await resp.json();
+
+          const isRetryable = resp.status >= 500 || resp.status === 429;
+          if (isRetryable && attempt < retries) {
+            const delay = baseDelay * Math.pow(2, attempt);
+            console.warn(`[FleetBuddy] HTTP ${resp.status} — retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
+
+          return { found: false, error: `Server error (HTTP ${resp.status}). ${attempt >= retries ? "All retries exhausted." : ""}` };
+        } catch (e) {
+          clearTimeout(tid);
+
+          if (e.name === "AbortError") {
+            if (attempt < retries) {
+              const delay = baseDelay * Math.pow(2, attempt);
+              console.warn(`[FleetBuddy] Timeout — retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+              await new Promise((r) => setTimeout(r, delay));
+              continue;
+            }
+            return { found: false, error: "Request timed out after multiple attempts. Check your connection and try again." };
+          }
+
+          if (attempt < retries) {
+            const delay = baseDelay * Math.pow(2, attempt);
+            console.warn(`[FleetBuddy] Network error — retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
+
+          return { found: false, error: `Network error: ${e.message}. Check your internet connection.` };
+        }
+      }
+    }
+
     async function callAPI(file, mode) {
       const b64 = await toBase64(file);
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 55000);
 
-      try {
-        const resp = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({ image: b64, mode })
-        });
-
-        clearTimeout(tid);
-
-        if (!resp.ok) return { found: false, error: `HTTP ${resp.status}` };
-        return await resp.json();
-      } catch (e) {
-        clearTimeout(tid);
-        return {
-          found: false,
-          error: e.name === "AbortError" ? "TIMEOUT — try again" : e.message
-        };
-      }
+      return fetchWithRetry(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: b64, mode })
+      });
     }
 
     async function decodeVin(vin) {
@@ -603,7 +631,7 @@
       );
     }
 
-    function ScanResult({ state, label, value, isVin }) {
+    function ScanResult({ state, label, value, isVin, errorMsg }) {
       if (state === "idle") return null;
 
       if (state === "scanning")
@@ -644,6 +672,53 @@
               >
                 Gemini AI analyzing image
               </div>
+            </div>
+          </div>
+        );
+
+      if (state === "failed")
+        return (
+          <div
+            className="animate-in"
+            style={{
+              background: "rgba(255,68,68,0.05)",
+              border: "1px solid rgba(255,68,68,0.2)",
+              borderRadius: 4,
+              padding: "14px 16px",
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              marginTop: 12
+            }}
+          >
+            <span style={{ fontSize: 18, color: "var(--red)", flexShrink: 0 }}>✕</span>
+            <div>
+              <div
+                style={{
+                  fontFamily: "var(--display)",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  letterSpacing: "0.1em",
+                  color: "var(--red)"
+                }}
+              >
+                {errorMsg && (errorMsg.includes("timed out") || errorMsg.includes("Network"))
+                  ? "CONNECTION ISSUE"
+                  : `COULD NOT READ ${label.toUpperCase()}`}
+              </div>
+              {errorMsg && (
+                <div
+                  style={{
+                    fontFamily: "var(--mono)",
+                    fontSize: 10,
+                    color: "rgba(255,68,68,0.7)",
+                    marginTop: 3,
+                    lineHeight: 1.4
+                  }}
+                >
+                  {errorMsg}
+                </div>
+              )}
             </div>
           </div>
         );
@@ -910,7 +985,8 @@
       sheetStatus,
       sheetAction,
       sheetDebugMsg,
-      onReset
+      onReset,
+      onRetrySync
     }) {
       const vi = data.vehicleInfo;
 
@@ -975,7 +1051,7 @@
               }
             />
 
-            {sheetStatus === "error" && sheetDebugMsg && (
+            {sheetStatus === "error" && (
               <div
                 style={{
                   marginTop: 12,
@@ -995,7 +1071,7 @@
                     marginBottom: 4
                   }}
                 >
-                  ERROR DETAIL
+                  SYNC FAILED
                 </div>
                 <div
                   style={{
@@ -1003,11 +1079,32 @@
                     fontSize: 10,
                     color: "rgba(255,68,68,0.8)",
                     wordBreak: "break-all",
-                    lineHeight: 1.5
+                    lineHeight: 1.5,
+                    marginBottom: 10
                   }}
                 >
-                  {sheetDebugMsg}
+                  {sheetDebugMsg || "Could not save to Google Sheets. Your data has been captured — tap retry to try again."}
                 </div>
+                {onRetrySync && (
+                  <button
+                    onClick={onRetrySync}
+                    style={{
+                      width: "100%",
+                      border: "1px solid rgba(255,184,0,0.4)",
+                      borderRadius: 3,
+                      padding: "10px",
+                      background: "rgba(255,184,0,0.08)",
+                      color: "var(--amber)",
+                      fontFamily: "var(--display)",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      letterSpacing: "0.12em",
+                      cursor: "pointer"
+                    }}
+                  >
+                    RETRY SYNC
+                  </button>
+                )}
               </div>
             )}
           </BracketCard>
@@ -1213,6 +1310,10 @@
       const [manualVin, setManualVin] = useState("");
       const [vehicleInfo, setVehicleInfo] = useState(null);
 
+      const [plateErrorMsg, setPlateErrorMsg] = useState("");
+      const [unitErrorMsg, setUnitErrorMsg] = useState("");
+      const [vinErrorMsg, setVinErrorMsg] = useState("");
+
       const [submittedBy, setSubmittedBy] = useState("");
       const [department, setDepartment] = useState("");
       const [location, setLocation] = useState("");
@@ -1256,6 +1357,7 @@
         setPlateScanState("scanning");
         setDetectedPlate("");
         setManualPlate("");
+        setPlateErrorMsg("");
 
         const r = await callAPI(data.file, "plate");
 
@@ -1264,6 +1366,9 @@
           setPlateScanState("done");
         } else {
           setPlateScanState("failed");
+          setPlateErrorMsg(
+            r.error || "No plate text found. Try a clearer photo or enter manually below."
+          );
         }
       };
 
@@ -1273,6 +1378,7 @@
         setDetectedUnit("");
         setManualUnit("");
         setUnitSkipped(false);
+        setUnitErrorMsg("");
 
         const r = await callAPI(data.file, "unit");
 
@@ -1281,6 +1387,9 @@
           setUnitScanState("done");
         } else {
           setUnitScanState("failed");
+          setUnitErrorMsg(
+            r.error || "No unit number found. Try a clearer photo or enter manually below."
+          );
         }
       };
 
@@ -1291,11 +1400,15 @@
         setVehicleInfo(null);
         setManualVin("");
         setExistingRecord(null);
+        setVinErrorMsg("");
 
         const r = await callAPI(data.file, "vin");
 
         if (!r.found || !r.vin) {
           setVinScanState("failed");
+          setVinErrorMsg(
+            r.error || "No VIN found. Try a clearer photo or enter the 17-character VIN manually."
+          );
           return;
         }
 
@@ -1337,31 +1450,26 @@
         }
       };
 
-      const sendToSheet = (payload) => {
-        const form = document.createElement("form");
-        form.method = "POST";
-        form.action = SHEET_URL;
-        form.target = "hiddenFrame";
-        form.style.display = "none";
+      const sendToSheet = async (payload) => {
+        const result = await fetchWithRetry(
+          SHEET_URL,
+          {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({ action: "submit", payload }),
+            redirect: "follow"
+          },
+          { retries: 3, baseDelay: 2000, timeout: 30000 }
+        );
 
-        const input = document.createElement("input");
-        input.type = "hidden";
-        input.name = "payload";
-        input.value = JSON.stringify(payload);
-
-        form.appendChild(input);
-        document.body.appendChild(form);
-        form.submit();
-
-        setTimeout(() => {
-          form.remove();
-        }, 1500);
+        return result;
       };
 
       const handleSubmit = async () => {
         setSubmitted(true);
         setSheetStatus("pending");
         setSheetDebugMsg("");
+        setSheetAction("");
 
         const payload = {
           entryId: "FB-" + Date.now(),
@@ -1388,16 +1496,19 @@
         };
 
         try {
-          sendToSheet(payload);
+          const result = await sendToSheet(payload);
 
-          setTimeout(() => {
+          if (result.error) {
+            setSheetStatus("error");
+            setSheetDebugMsg(result.error);
+          } else {
             setSheetStatus("synced");
             setSheetAction(existingRecord ? "UPDATED" : "NEW VEHICLE");
-          }, 1200);
+          }
         } catch (e) {
           console.error("FleetBuddy submit error:", e);
           setSheetStatus("error");
-          setSheetDebugMsg("SUBMIT ERR: " + e.message);
+          setSheetDebugMsg("Could not reach Google Sheets. Check your connection and try again.");
         }
       };
 
@@ -1407,16 +1518,19 @@
         setPlateScanState("idle");
         setDetectedPlate("");
         setManualPlate("");
+        setPlateErrorMsg("");
         setUnitPhoto(null);
         setUnitScanState("idle");
         setDetectedUnit("");
         setManualUnit("");
         setUnitSkipped(false);
+        setUnitErrorMsg("");
         setVinPhoto(null);
         setVinScanState("idle");
         setDetectedVin("");
         setManualVin("");
         setVehicleInfo(null);
+        setVinErrorMsg("");
         setSubmittedBy("");
         setDepartment("");
         setLocation("");
@@ -1524,6 +1638,7 @@
                 sheetAction={sheetAction}
                 sheetDebugMsg={sheetDebugMsg}
                 onReset={reset}
+                onRetrySync={handleSubmit}
               />
             ) : (
               <>
@@ -1625,6 +1740,7 @@
                         state={plateScanState}
                         label="License Plate"
                         value={detectedPlate}
+                        errorMsg={plateErrorMsg}
                       />
 
                       {plateScanState === "failed" && (
@@ -1662,6 +1778,7 @@
                         state={unitScanState}
                         label="Unit Number"
                         value={detectedUnit}
+                        errorMsg={unitErrorMsg}
                       />
 
                       {unitScanState === "failed" && !unitSkipped && (
@@ -1764,6 +1881,7 @@
                         label="VIN"
                         value={detectedVin}
                         isVin
+                        errorMsg={vinErrorMsg}
                       />
 
                       {vinScanState === "done" && (
