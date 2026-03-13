@@ -2096,12 +2096,18 @@
                         <label className="field-label">
                           Assigned To <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span>
                         </label>
-                        <input
-                          value={assignedTo}
-                          onChange={(e) => setAssignedTo(e.target.value)}
-                          placeholder="Driver or employee name"
-                          className="field-input"
-                        />
+                        <div style={{ position: "relative" }}>
+                          <input
+                            value={assignedTo}
+                            onChange={(e) => setAssignedTo(e.target.value)}
+                            placeholder="Driver name or select below"
+                            className={`field-input ${assignedTo ? "filled" : ""}`}
+                            list="assignedToOptions"
+                          />
+                          <datalist id="assignedToOptions">
+                            <option value="Spare / Unassigned" />
+                          </datalist>
+                        </div>
                       </div>
 
                       <div>
