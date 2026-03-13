@@ -204,6 +204,22 @@
       "https://script.google.com/macros/s/AKfycbzKK9QoGBtz50KP_lQ2sIkUJPrRdO6oM-rSbtamlfjliMiI_-eK4NjLtv29X5oLZxwW/exec";
     const API_URL = "/api/platerecognizer";
 
+    const DEFAULT_PILOT_MEMBERS = [
+      "Beard, Bradly",
+      "Belcher, Jamaal",
+      "Castillo, Jonathon",
+      "Chamberlain, Angela",
+      "Crouch, Rick",
+      "Hosking, Nick",
+      "Hubbard, Tyler",
+      "Newton, Michael",
+      "Odam, Jeremy",
+      "Ryan, Casey",
+      "Schmitke, Grant",
+      "Shaw, Bradley",
+      "Wells, Steve"
+    ];
+
     const DEFAULT_DEPARTMENTS = [
       "Construction",
       "Contract Management",
@@ -1289,6 +1305,7 @@
     }
 
     function App() {
+      const [pilotMembers, setPilotMembers] = useState(DEFAULT_PILOT_MEMBERS);
       const [departments, setDepartments] = useState(DEFAULT_DEPARTMENTS);
       const [locations, setLocations] = useState(DEFAULT_LOCATIONS);
       const [step, setStep] = useState(0);
@@ -1316,6 +1333,7 @@
       const [vinErrorMsg, setVinErrorMsg] = useState("");
 
       const [submittedBy, setSubmittedBy] = useState("");
+      const [customName, setCustomName] = useState("");
       const [department, setDepartment] = useState("");
       const [location, setLocation] = useState("");
       const [assignedTo, setAssignedTo] = useState("");
@@ -1331,6 +1349,7 @@
         fetch(`${SHEET_URL}?action=getConfig`)
           .then((r) => r.json())
           .then((j) => {
+            if (j.pilotMembers?.length) setPilotMembers(j.pilotMembers);
             if (j.departments?.length) setDepartments(j.departments);
             if (j.locations?.length) setLocations(j.locations);
           })
@@ -1348,7 +1367,8 @@
           return vinScanState === "done" || (vinScanState === "failed" && manualVin.replace(/[^A-HJ-NPR-Z0-9]/gi, "").length === 17);
         }
         if (stepId === "details") {
-          return !!(submittedBy.trim() && department && location);
+          const nameOk = submittedBy === "__OTHER__" ? customName.trim().length > 0 : submittedBy.trim().length > 0;
+          return !!(nameOk && department && location);
         }
         return false;
       })();
@@ -1481,28 +1501,29 @@
         setSheetDebugMsg("");
         setSheetAction("");
 
+        const resolvedName = submittedBy === "__OTHER__" ? customName.trim() : submittedBy;
+
         const payload = {
-          entryId: "FB-" + Date.now(),
           timestamp: new Date().toLocaleString(),
-          vin: detectedVin || manualVin || "",
-          licensePlate: detectedPlate || manualPlate || "",
           unitNumber: unitSkipped ? "N/A" : detectedUnit || manualUnit || "",
-          unitSkipped,
+          licensePlate: detectedPlate || manualPlate || "",
+          location,
+          department,
           year: vehicleInfo?.year || "",
           make: vehicleInfo?.make || "",
           model: vehicleInfo?.model || "",
+          assignedTo,
+          submittedBy: resolvedName,
+          vin: detectedVin || manualVin || "",
           trim: vehicleInfo?.trim || "",
           body: vehicleInfo?.body || "",
           engine: vehicleInfo?.engine || "",
           cylinders: vehicleInfo?.cylinders || "",
           drive: vehicleInfo?.drive || "",
           fuel: vehicleInfo?.fuel || "",
-          submittedBy,
-          department,
-          location,
-          assignedTo,
           notes,
-          source: "FleetBuddy v5.0"
+          entryId: "FB-" + Date.now(),
+          unitSkipped
         };
 
         console.log("[FleetBuddy] Submitting payload:", payload.entryId, existingRecord ? "UPDATE" : "NEW");
@@ -1545,6 +1566,7 @@
         setVehicleInfo(null);
         setVinErrorMsg("");
         setSubmittedBy("");
+        setCustomName("");
         setDepartment("");
         setLocation("");
         setAssignedTo("");
@@ -1965,12 +1987,44 @@
                         <label className="field-label">
                           Your Name <span style={{ color: "var(--red)" }}>*</span>
                         </label>
-                        <input
-                          value={submittedBy}
-                          onChange={(e) => setSubmittedBy(e.target.value)}
-                          placeholder="First and last name"
-                          className={`field-input ${submittedBy ? "filled" : ""}`}
-                        />
+                        {submittedBy === "__OTHER__" ? (
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            <input
+                              value={customName}
+                              onChange={(e) => setCustomName(e.target.value)}
+                              placeholder="Enter your full name"
+                              className={`field-input ${customName ? "filled" : ""}`}
+                              style={{ flex: 1 }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => { setSubmittedBy(""); setCustomName(""); }}
+                              style={{
+                                background: "var(--surface2)",
+                                border: "1px solid var(--border2)",
+                                color: "var(--muted)",
+                                borderRadius: "8px",
+                                padding: "0 12px",
+                                cursor: "pointer",
+                                fontFamily: "var(--body)",
+                                fontSize: "14px"
+                              }}
+                            >Back</button>
+                          </div>
+                        ) : (
+                          <select
+                            value={submittedBy}
+                            onChange={(e) => setSubmittedBy(e.target.value)}
+                            className={`field-input ${submittedBy ? "filled" : ""}`}
+                            style={{ color: submittedBy ? "var(--text)" : "var(--muted)" }}
+                          >
+                            <option value="">Select your name...</option>
+                            {pilotMembers.map((name) => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                            <option value="__OTHER__">+ Add name</option>
+                          </select>
+                        )}
                       </div>
 
                       <div>
