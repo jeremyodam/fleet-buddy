@@ -1460,14 +1460,12 @@
       };
 
       const sendToSheet = async (payload) => {
-        const formBody = new URLSearchParams();
-        formBody.set("payload", JSON.stringify(payload));
-
         const result = await fetchWithRetry(
           SHEET_URL,
           {
             method: "POST",
-            body: formBody,
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify(payload),
             redirect: "follow"
           },
           { retries: 3, baseDelay: 2000, timeout: 30000 }
