@@ -96,17 +96,12 @@
     @keyframes scanline {
       0% {
         top: 0%;
-        opacity: 0;
       }
-      5% {
-        opacity: 1;
-      }
-      95% {
-        opacity: 1;
+      50% {
+        top: 100%;
       }
       100% {
-        top: 100%;
-        opacity: 0;
+        top: 0%;
       }
     }
 
@@ -616,7 +611,7 @@
                   height: 3,
                   background: "linear-gradient(90deg, transparent 5%, var(--cyan) 50%, transparent 95%)",
                   boxShadow: "0 0 8px var(--cyan), 0 0 20px rgba(0,212,255,0.3)",
-                  animation: "scanline 1.8s ease-in-out infinite",
+                  animation: "scanline 2.4s ease-in-out infinite",
                   opacity: 0.6
                 }}
               />
